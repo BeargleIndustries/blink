@@ -9,8 +9,11 @@ description = "Safe Rust wrapper around stable-diffusion.cpp via diffusion-rs-sy
 image = "0.25"
 thiserror = "2"
 log = "0.4"
+sd-sys = { path = "../sd-sys" }
+libc = "0.2"
 
 [features]
 default = []
-metal = []
-cuda = []
+metal = ["sd-sys/metal"]
+cuda = ["sd-sys/cuda"]
+vulkan = ["sd-sys/vulkan"]

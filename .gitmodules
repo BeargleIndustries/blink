@@ -1,0 +1,3 @@
+[submodule "crates/sd-sys/stable-diffusion.cpp"]
+	path = crates/sd-sys/stable-diffusion.cpp
+	url = https://github.com/leejet/stable-diffusion.cpp.git

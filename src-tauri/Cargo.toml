@@ -32,3 +32,4 @@ base64 = "0.22"
 default = []
 metal = ["sd-wrapper/metal"]
 cuda = ["sd-wrapper/cuda"]
+vulkan = ["sd-wrapper/vulkan"]

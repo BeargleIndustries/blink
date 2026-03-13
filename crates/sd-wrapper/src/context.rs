@@ -2,9 +2,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 use crate::error::SdError;
+use crate::ffi_bridge::SdCppContext;
 use crate::types::*;
 use crate::progress::{ProgressCallback, ProgressUpdate};
-use crate::generation;
 
 pub enum InferenceCommand {
     Txt2Img {
@@ -50,16 +50,39 @@ impl SdContext {
             .spawn(move || {
                 log::info!("Inference thread started for model: {}", thread_config.model_path);
 
-                // TODO: Initialize sd_ctx via diffusion-rs-sys here
-                // let ctx = unsafe { new_sd_ctx(...) };
+                // Initialize sd.cpp context (loads the model)
+                let cpp_ctx = match SdCppContext::new(&thread_config) {
+                    Ok(ctx) => ctx,
+                    Err(e) => {
+                        log::error!("Failed to load model: {}", e);
+                        // Drain remaining commands and send errors
+                        while let Ok(cmd) = command_rx.try_recv() {
+                            match cmd {
+                                InferenceCommand::Txt2Img { result_tx, .. } => {
+                                    let _ = result_tx.send(Err(SdError::ContextCreationFailed {
+                                        reason: format!("Model failed to load: {}", e),
+                                    }));
+                                }
+                                InferenceCommand::Img2Img { result_tx, .. } => {
+                                    let _ = result_tx.send(Err(SdError::ContextCreationFailed {
+                                        reason: format!("Model failed to load: {}", e),
+                                    }));
+                                }
+                                InferenceCommand::Shutdown => {}
+                            }
+                        }
+                        return;
+                    }
+                };
 
                 while let Ok(cmd) = command_rx.recv() {
                     match cmd {
                         InferenceCommand::Txt2Img { params, progress_cb, result_tx } => {
                             thread_cancel.store(false, Ordering::SeqCst);
-                            let result = generation::generate_txt2img_internal(
-                                &thread_config,
+                            let result = cpp_ctx.generate(
                                 &params,
+                                None,   // no input image for txt2img
+                                0.0,    // strength unused for txt2img
                                 progress_cb,
                                 &thread_cancel,
                             );
@@ -67,10 +90,10 @@ impl SdContext {
                         }
                         InferenceCommand::Img2Img { input_image, params, progress_cb, result_tx } => {
                             thread_cancel.store(false, Ordering::SeqCst);
-                            let result = generation::generate_img2img_internal(
-                                &thread_config,
-                                &input_image,
-                                &params,
+                            let result = cpp_ctx.generate(
+                                &params.base,
+                                Some(&input_image),
+                                params.strength,
                                 progress_cb,
                                 &thread_cancel,
                             );
@@ -83,7 +106,7 @@ impl SdContext {
                     }
                 }
 
-                // TODO: free_sd_ctx(ctx) here
+                // cpp_ctx is dropped here, which calls free_sd_ctx via Drop
                 log::info!("Inference thread stopped");
             })
             .map_err(|e| SdError::ContextCreationFailed {

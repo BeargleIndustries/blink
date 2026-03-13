@@ -5,3 +5,4 @@ dist/
 *.log
 models/
 .omc/
+crates/sd-sys/stable-diffusion.cpp/build/

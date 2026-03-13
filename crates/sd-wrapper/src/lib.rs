@@ -1,5 +1,6 @@
 pub mod context;
 pub mod error;
+mod ffi_bridge;
 pub mod generation;
 pub mod progress;
 pub mod types;
