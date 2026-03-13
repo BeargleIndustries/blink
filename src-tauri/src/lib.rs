@@ -38,5 +38,5 @@ pub fn run() {
             commands::gallery::save_to_gallery,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running simple-img-gen");
+        .expect("error while running blink");
 }

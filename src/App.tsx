@@ -260,7 +260,7 @@ const App: Component = () => {
       }}>
         <div style={{ display: "flex", "align-items": "center", gap: "12px" }}>
           <span style={{ "font-weight": "bold", "font-size": "16px" }}>
-            Simple Image Gen
+            Blink
           </span>
           <ModelSelector
             models={models()}

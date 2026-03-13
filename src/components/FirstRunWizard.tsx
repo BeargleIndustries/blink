@@ -38,7 +38,7 @@ const FirstRunWizard: Component<FirstRunWizardProps> = (props) => {
         "text-align": "center",
       }}>
         <h1 style={{ "margin-bottom": "8px", "font-size": "24px" }}>
-          Welcome to Simple Image Gen
+          Welcome to Blink
         </h1>
         <p style={{ color: "var(--text-secondary)", "margin-bottom": "24px" }}>
           To get started, download an AI model. We recommend starting with{" "}

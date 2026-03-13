@@ -1,8 +1,8 @@
-# Simple Image Gen
+# Blink
 
 ## Project Context
 Dead-simple local AI image generation app. Native cross-platform desktop tool — type a prompt, get an image. No Python, no node graphs.
-Vault overview: `D:\BeargleVault\projects\simple-image-gen\simple-image-gen.md`
+Vault overview: `D:\BeargleVault\projects\blink\blink.md`
 
 ## Tech Stack
 - Tauri v2 (Rust backend, TypeScript/HTML frontend)

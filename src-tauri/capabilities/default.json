@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default permissions for Simple Image Gen",
+  "description": "Default permissions for Blink",
   "windows": ["main"],
   "permissions": [
     "core:default",

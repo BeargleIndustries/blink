@@ -1,11 +1,11 @@
 [package]
-name = "simple-img-gen"
+name = "blink"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
 [lib]
-name = "simple_img_gen_lib"
+name = "blink_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

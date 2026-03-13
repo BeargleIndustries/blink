@@ -55,7 +55,7 @@ const AboutDialog: Component<AboutDialogProps> = (props) => {
           "align-items": "center",
           "margin-bottom": "16px",
         }}>
-          <h2 style={{ margin: "0" }}>About Simple Image Gen</h2>
+          <h2 style={{ margin: "0" }}>About Blink</h2>
           <button
             onClick={props.onClose}
             style={{
