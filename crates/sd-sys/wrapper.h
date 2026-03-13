@@ -1,1 +1,1 @@
-#include "stable-diffusion.cpp/include/stable-diffusion.h"
+#include "stable-diffusion.h"
