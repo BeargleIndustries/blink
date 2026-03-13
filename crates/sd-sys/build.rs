@@ -23,6 +23,15 @@ fn main() {
         cmake_cfg.define("GGML_VULKAN", "ON");
     }
 
+    // Read target info early (used for CMake config and linking)
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
+
+    // macOS: std::filesystem requires 10.15+
+    if target_os == "macos" {
+        cmake_cfg.define("CMAKE_OSX_DEPLOYMENT_TARGET", "10.15");
+    }
+
     let dst = cmake_cfg.build();
 
     // --- Link search paths ---
@@ -46,9 +55,6 @@ fn main() {
     }
 
     // --- System libraries ---
-    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
-    let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
-
     match target_os.as_str() {
         "linux" => {
             println!("cargo:rustc-link-lib=stdc++");
@@ -121,6 +127,8 @@ fn main() {
         .allowlist_function("convert")
         .allowlist_function("preprocess_canny")
         .allowlist_function("str_to_.*")
+        // Enum variant constants (bindgen treats C enum values as vars, not types)
+        .allowlist_var(".*")
         .generate()
         .expect("Failed to generate bindings");
 
