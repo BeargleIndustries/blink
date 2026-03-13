@@ -98,29 +98,46 @@ fn main() {
     }
 
     // --- Bindgen ---
-    let wrapper_h = manifest_dir.join("wrapper.h");
     let include_dir = sd_cpp_dir.join("include");
+    let header_path = include_dir.join("stable-diffusion.h");
 
     let bindings = bindgen::Builder::default()
-        .header(wrapper_h.to_str().unwrap())
+        .header(header_path.to_str().unwrap())
         .clang_arg(format!("-I{}", include_dir.display()))
         // Force C enums to generate as top-level constants (type alias + pub const)
         .default_enum_style(bindgen::EnumVariation::Consts)
-        // No allowlists — wrapper.h only includes stable-diffusion.h,
-        // so all generated items are from sd.cpp's public API
+        .constified_enum(".*")
         .generate()
         .expect("Failed to generate bindings");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let bindings_path = out_dir.join("bindings.rs");
     bindings
-        .write_to_file(out_dir.join("bindings.rs"))
+        .write_to_file(&bindings_path)
         .expect("Failed to write bindings");
 
+    // Debug: print generated bindings summary to help diagnose CI issues
+    if let Ok(content) = std::fs::read_to_string(&bindings_path) {
+        let enum_lines: Vec<&str> = content.lines()
+            .filter(|l| l.contains("EULER") || l.contains("KARRAS") || l.contains("SD_TYPE_COUNT") || l.contains("sample_method_t"))
+            .collect();
+        eprintln!("bindgen debug: {} total lines, {} enum-related lines", content.lines().count(), enum_lines.len());
+        for line in &enum_lines {
+            eprintln!("  {}", line);
+        }
+        if enum_lines.is_empty() {
+            eprintln!("WARNING: No enum constants found in generated bindings!");
+            eprintln!("First 20 lines of bindings.rs:");
+            for line in content.lines().take(20) {
+                eprintln!("  {}", line);
+            }
+        }
+    }
+
     // --- Rerun triggers ---
-    println!("cargo:rerun-if-changed=wrapper.h");
     println!(
         "cargo:rerun-if-changed={}",
-        sd_cpp_dir.join("include").join("stable-diffusion.h").display()
+        header_path.display()
     );
 }
 
