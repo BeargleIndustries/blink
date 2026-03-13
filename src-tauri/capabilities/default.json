@@ -1,0 +1,21 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for Simple Image Gen",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "fs:default",
+    "fs:allow-read",
+    "fs:allow-write",
+    "fs:allow-exists",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
+    "fs:allow-rename",
+    "shell:default",
+    "shell:allow-open",
+    "store:default"
+  ]
+}

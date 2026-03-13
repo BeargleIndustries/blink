@@ -1,0 +1,16 @@
+[package]
+name = "sd-wrapper"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Safe Rust wrapper around stable-diffusion.cpp via diffusion-rs-sys"
+
+[dependencies]
+image = "0.25"
+thiserror = "2"
+log = "0.4"
+
+[features]
+default = []
+metal = []
+cuda = []

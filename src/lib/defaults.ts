@@ -1,0 +1,35 @@
+export interface ModelDefaults {
+  width: number;
+  height: number;
+  steps: number;
+  cfg_scale: number;
+  sampler: string;
+}
+
+export const MODEL_DEFAULTS: Record<string, ModelDefaults> = {
+  "sd15-q8": {
+    width: 512,
+    height: 512,
+    steps: 20,
+    cfg_scale: 7.0,
+    sampler: "euler_a",
+  },
+  "sdxl-q5": {
+    width: 1024,
+    height: 1024,
+    steps: 25,
+    cfg_scale: 7.0,
+    sampler: "euler_a",
+  },
+  "flux-schnell-q4": {
+    width: 1024,
+    height: 1024,
+    steps: 4,
+    cfg_scale: 1.0,
+    sampler: "euler",
+  },
+};
+
+export function getDefaultsForModel(modelId: string): ModelDefaults {
+  return MODEL_DEFAULTS[modelId] ?? MODEL_DEFAULTS["sd15-q8"];
+}
