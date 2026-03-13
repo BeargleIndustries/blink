@@ -33,6 +33,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": ["../../THIRD_PARTY_LICENSES.txt", "../../models.json"]
+    "resources": ["../THIRD_PARTY_LICENSES.txt", "../models.json"]
   }
 }
