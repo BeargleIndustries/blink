@@ -4,5 +4,4 @@ dist/
 .DS_Store
 *.log
 models/
-THIRD_PARTY_LICENSES.txt
 .omc/
