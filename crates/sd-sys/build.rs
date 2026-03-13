@@ -104,6 +104,8 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header(wrapper_h.to_str().unwrap())
         .clang_arg(format!("-I{}", include_dir.display()))
+        // Force C enums to generate as top-level constants (not Rust enums)
+        .default_enum_style(bindgen::EnumVariation::Consts)
         .allowlist_type("sd_.*")
         .allowlist_type("sample_method_t")
         .allowlist_type("scheduler_t")
