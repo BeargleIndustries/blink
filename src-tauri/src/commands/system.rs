@@ -1,4 +1,5 @@
 use serde::Serialize;
+use sd_wrapper::gpu::compiled_backend;
 
 #[derive(Debug, Serialize)]
 pub struct SystemInfo {
@@ -10,14 +11,7 @@ pub struct SystemInfo {
 #[tauri::command]
 pub fn get_system_info() -> SystemInfo {
     SystemInfo {
-        compiled_backend: if cfg!(feature = "cuda") {
-            "cuda"
-        } else if cfg!(feature = "metal") {
-            "metal"
-        } else {
-            "cpu"
-        }
-        .to_string(),
+        compiled_backend: compiled_backend().to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
     }
