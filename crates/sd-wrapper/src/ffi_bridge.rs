@@ -292,3 +292,64 @@ impl SampleMethod {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- SampleMethod to C enum mapping --
+
+    #[test]
+    fn sample_method_euler_maps_correctly() {
+        assert_eq!(SampleMethod::Euler.to_c(), sd_sys::EULER_SAMPLE_METHOD);
+    }
+
+    #[test]
+    fn sample_method_euler_a_maps_correctly() {
+        assert_eq!(SampleMethod::EulerA.to_c(), sd_sys::EULER_A_SAMPLE_METHOD);
+    }
+
+    #[test]
+    fn sample_method_heun_maps_correctly() {
+        assert_eq!(SampleMethod::Heun.to_c(), sd_sys::HEUN_SAMPLE_METHOD);
+    }
+
+    #[test]
+    fn sample_method_dpm2_maps_correctly() {
+        assert_eq!(SampleMethod::Dpm2.to_c(), sd_sys::DPM2_SAMPLE_METHOD);
+    }
+
+    #[test]
+    fn sample_method_dpmpp2m_maps_correctly() {
+        assert_eq!(
+            SampleMethod::DpmPlusPlus2m.to_c(),
+            sd_sys::DPMPP2M_SAMPLE_METHOD
+        );
+    }
+
+    #[test]
+    fn sample_method_lcm_maps_correctly() {
+        assert_eq!(SampleMethod::Lcm.to_c(), sd_sys::LCM_SAMPLE_METHOD);
+    }
+
+    // -- ContextConfig with missing model returns ModelNotFound --
+
+    #[test]
+    fn new_context_with_missing_model_returns_error() {
+        let config = ContextConfig {
+            model_path: "/nonexistent/model.gguf".into(),
+            vae_path: None,
+            n_threads: 4,
+        };
+        let result = SdCppContext::new(&config);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            SdError::ModelNotFound { path } => assert!(path.contains("nonexistent")),
+            other => panic!("Expected ModelNotFound, got: {:?}", other),
+        }
+    }
+}

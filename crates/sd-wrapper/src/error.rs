@@ -44,3 +44,24 @@ pub enum SdError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_not_found_error_includes_path() {
+        let err = SdError::ModelNotFound {
+            path: "/tmp/missing.gguf".into(),
+        };
+        let msg = format!("{}", err);
+        assert!(msg.contains("/tmp/missing.gguf"));
+    }
+
+    #[test]
+    fn cancelled_error_is_descriptive() {
+        let err = SdError::Cancelled;
+        let msg = format!("{}", err);
+        assert!(msg.contains("cancelled"));
+    }
+}

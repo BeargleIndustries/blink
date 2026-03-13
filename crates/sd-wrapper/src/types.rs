@@ -65,3 +65,23 @@ pub enum SampleMethod {
     DpmPlusPlus2m,
     Lcm,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_generation_params_are_valid() {
+        let params = GenerationParams::default();
+        assert_eq!(params.width, 512);
+        assert_eq!(params.height, 512);
+        assert_eq!(params.steps, 20);
+        assert!(params.cfg_scale > 0.0);
+    }
+
+    #[test]
+    fn default_img2img_params_have_valid_strength() {
+        let params = Img2ImgParams::default();
+        assert!(params.strength > 0.0 && params.strength <= 1.0);
+    }
+}

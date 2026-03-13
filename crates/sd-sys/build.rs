@@ -71,6 +71,26 @@ fn main() {
         _ => {}
     }
 
+    // --- CUDA system libraries ---
+    if cfg!(feature = "cuda") {
+        println!("cargo:rustc-link-lib=cudart");
+        println!("cargo:rustc-link-lib=cublas");
+        println!("cargo:rustc-link-lib=cublasLt");
+    }
+
+    // --- Vulkan system libraries ---
+    if cfg!(feature = "vulkan") {
+        match target_os.as_str() {
+            "windows" => {
+                println!("cargo:rustc-link-lib=vulkan-1");
+            }
+            "linux" => {
+                println!("cargo:rustc-link-lib=vulkan");
+            }
+            _ => {}
+        }
+    }
+
     // --- Bindgen ---
     let wrapper_h = manifest_dir.join("wrapper.h");
     let include_dir = sd_cpp_dir.join("include");
