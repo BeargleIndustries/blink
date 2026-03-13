@@ -113,28 +113,9 @@ fn main() {
         .expect("Failed to generate bindings");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let bindings_path = out_dir.join("bindings.rs");
     bindings
-        .write_to_file(&bindings_path)
+        .write_to_file(out_dir.join("bindings.rs"))
         .expect("Failed to write bindings");
-
-    // Debug: print generated bindings summary to help diagnose CI issues
-    if let Ok(content) = std::fs::read_to_string(&bindings_path) {
-        let enum_lines: Vec<&str> = content.lines()
-            .filter(|l| l.contains("EULER") || l.contains("KARRAS") || l.contains("SD_TYPE_COUNT") || l.contains("sample_method_t"))
-            .collect();
-        eprintln!("bindgen debug: {} total lines, {} enum-related lines", content.lines().count(), enum_lines.len());
-        for line in &enum_lines {
-            eprintln!("  {}", line);
-        }
-        if enum_lines.is_empty() {
-            eprintln!("WARNING: No enum constants found in generated bindings!");
-            eprintln!("First 20 lines of bindings.rs:");
-            for line in content.lines().take(20) {
-                eprintln!("  {}", line);
-            }
-        }
-    }
 
     // --- Rerun triggers ---
     println!(
