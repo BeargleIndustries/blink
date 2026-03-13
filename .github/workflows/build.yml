@@ -57,4 +57,5 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_FEATURES: ${{ matrix.features }}
+        with:
+          args: ${{ matrix.features != '' && format('--features {0}', matrix.features) || '' }}

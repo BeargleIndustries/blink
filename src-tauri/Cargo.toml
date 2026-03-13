@@ -27,3 +27,8 @@ sha2 = "0.10"
 image = "0.25"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
+
+[features]
+default = []
+metal = ["sd-wrapper/metal"]
+cuda = ["sd-wrapper/cuda"]
