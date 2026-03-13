@@ -58,9 +58,11 @@ fn main() {
     match target_os.as_str() {
         "linux" => {
             println!("cargo:rustc-link-lib=stdc++");
+            println!("cargo:rustc-link-lib=gomp"); // OpenMP (used by ggml-cpu)
         }
         "macos" => {
             println!("cargo:rustc-link-lib=c++");
+            println!("cargo:rustc-link-lib=framework=Accelerate"); // vDSP (used by ggml)
             if cfg!(feature = "metal") {
                 println!("cargo:rustc-link-lib=framework=Metal");
                 println!("cargo:rustc-link-lib=framework=Foundation");
