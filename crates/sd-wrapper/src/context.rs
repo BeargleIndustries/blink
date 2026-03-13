@@ -4,7 +4,7 @@ use std::thread;
 use crate::error::SdError;
 use crate::ffi_bridge::SdCppContext;
 use crate::types::*;
-use crate::progress::{ProgressCallback, ProgressUpdate};
+use crate::progress::ProgressCallback;
 
 pub enum InferenceCommand {
     Txt2Img {

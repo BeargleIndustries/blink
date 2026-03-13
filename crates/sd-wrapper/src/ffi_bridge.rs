@@ -54,7 +54,7 @@ impl SdCppContext {
             params.n_threads = config.n_threads;
             params.vae_decode_only = true;
             // SD_TYPE_COUNT = auto-detect quantization from model file
-            params.wtype = sd_sys::SD_TYPE_COUNT;
+            params.wtype = sd_sys::sd_type_t_SD_TYPE_COUNT;
 
             log::info!(
                 "Creating sd.cpp context: model={}, threads={}",
@@ -167,7 +167,7 @@ impl SdCppContext {
             sd_sys::sd_sample_params_init(&mut sample_params);
             sample_params.sample_method = params.sample_method.to_c();
             sample_params.sample_steps = params.steps as i32;
-            sample_params.scheduler = sd_sys::KARRAS_SCHEDULER;
+            sample_params.scheduler = sd_sys::scheduler_t_KARRAS_SCHEDULER;
             sample_params.guidance.txt_cfg = params.cfg_scale;
             gen_params.sample_params = sample_params;
 
@@ -283,12 +283,12 @@ impl SampleMethod {
     /// Map our Rust enum to the C `sample_method_t` value.
     pub(crate) fn to_c(self) -> sd_sys::sample_method_t {
         match self {
-            SampleMethod::Euler => sd_sys::EULER_SAMPLE_METHOD,
-            SampleMethod::EulerA => sd_sys::EULER_A_SAMPLE_METHOD,
-            SampleMethod::Heun => sd_sys::HEUN_SAMPLE_METHOD,
-            SampleMethod::Dpm2 => sd_sys::DPM2_SAMPLE_METHOD,
-            SampleMethod::DpmPlusPlus2m => sd_sys::DPMPP2M_SAMPLE_METHOD,
-            SampleMethod::Lcm => sd_sys::LCM_SAMPLE_METHOD,
+            SampleMethod::Euler => sd_sys::sample_method_t_EULER_SAMPLE_METHOD,
+            SampleMethod::EulerA => sd_sys::sample_method_t_EULER_A_SAMPLE_METHOD,
+            SampleMethod::Heun => sd_sys::sample_method_t_HEUN_SAMPLE_METHOD,
+            SampleMethod::Dpm2 => sd_sys::sample_method_t_DPM2_SAMPLE_METHOD,
+            SampleMethod::DpmPlusPlus2m => sd_sys::sample_method_t_DPMPP2M_SAMPLE_METHOD,
+            SampleMethod::Lcm => sd_sys::sample_method_t_LCM_SAMPLE_METHOD,
         }
     }
 }
@@ -305,35 +305,35 @@ mod tests {
 
     #[test]
     fn sample_method_euler_maps_correctly() {
-        assert_eq!(SampleMethod::Euler.to_c(), sd_sys::EULER_SAMPLE_METHOD);
+        assert_eq!(SampleMethod::Euler.to_c(), sd_sys::sample_method_t_EULER_SAMPLE_METHOD);
     }
 
     #[test]
     fn sample_method_euler_a_maps_correctly() {
-        assert_eq!(SampleMethod::EulerA.to_c(), sd_sys::EULER_A_SAMPLE_METHOD);
+        assert_eq!(SampleMethod::EulerA.to_c(), sd_sys::sample_method_t_EULER_A_SAMPLE_METHOD);
     }
 
     #[test]
     fn sample_method_heun_maps_correctly() {
-        assert_eq!(SampleMethod::Heun.to_c(), sd_sys::HEUN_SAMPLE_METHOD);
+        assert_eq!(SampleMethod::Heun.to_c(), sd_sys::sample_method_t_HEUN_SAMPLE_METHOD);
     }
 
     #[test]
     fn sample_method_dpm2_maps_correctly() {
-        assert_eq!(SampleMethod::Dpm2.to_c(), sd_sys::DPM2_SAMPLE_METHOD);
+        assert_eq!(SampleMethod::Dpm2.to_c(), sd_sys::sample_method_t_DPM2_SAMPLE_METHOD);
     }
 
     #[test]
     fn sample_method_dpmpp2m_maps_correctly() {
         assert_eq!(
             SampleMethod::DpmPlusPlus2m.to_c(),
-            sd_sys::DPMPP2M_SAMPLE_METHOD
+            sd_sys::sample_method_t_DPMPP2M_SAMPLE_METHOD
         );
     }
 
     #[test]
     fn sample_method_lcm_maps_correctly() {
-        assert_eq!(SampleMethod::Lcm.to_c(), sd_sys::LCM_SAMPLE_METHOD);
+        assert_eq!(SampleMethod::Lcm.to_c(), sd_sys::sample_method_t_LCM_SAMPLE_METHOD);
     }
 
     // -- ContextConfig with missing model returns ModelNotFound --
