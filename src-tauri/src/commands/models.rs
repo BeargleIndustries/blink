@@ -27,8 +27,12 @@ pub struct ManifestModel {
     pub default_sampler: String,
     pub license: ModelLicense,
     pub tier: u32,
+    #[serde(default = "default_true")]
+    pub available: bool,
     pub recommended_for: Vec<String>,
 }
+
+fn default_true() -> bool { true }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelLicense {
@@ -117,7 +121,7 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
     let metadata = load_metadata(&model_dir);
     let active = state.active_model.lock().map_err(|e| e.to_string())?.clone();
 
-    let models = manifest.models.iter().map(|m| {
+    let models = manifest.models.iter().filter(|m| m.available).map(|m| {
         let downloaded = metadata.models.get(&m.id)
             .map(|s| s.status == "ready")
             .unwrap_or(false);
