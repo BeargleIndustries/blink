@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, createEffect, onMount } from "solid-js";
+import { Component, Show, createSignal, createEffect, onMount, onCleanup } from "solid-js";
 import MaskCanvas, { MaskCanvasAPI } from "./MaskCanvas";
 import InpaintToolbar from "./InpaintToolbar";
 
@@ -27,10 +27,31 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
   const [imgNaturalWidth, setImgNaturalWidth] = createSignal(512);
   const [imgNaturalHeight, setImgNaturalHeight] = createSignal(512);
 
-  // Container is fixed at 512x512
-  const containerSize = 512;
+  // Measured container dimensions (responsive)
+  const [containerW, setContainerW] = createSignal(512);
+  const [containerH, setContainerH] = createSignal(512);
 
+  let containerRef: HTMLDivElement | undefined;
   let maskApi: MaskCanvasAPI | undefined;
+  let resizeObserver: ResizeObserver | undefined;
+
+  onMount(() => {
+    if (containerRef) {
+      setContainerW(containerRef.clientWidth);
+      setContainerH(containerRef.clientHeight);
+      resizeObserver = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          setContainerW(entry.contentRect.width);
+          setContainerH(entry.contentRect.height);
+        }
+      });
+      resizeObserver.observe(containerRef);
+    }
+  });
+
+  onCleanup(() => {
+    resizeObserver?.disconnect();
+  });
 
   // Clear mask when a new input image is loaded
   createEffect(() => {
@@ -89,15 +110,16 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
   return (
     <div style={{ display: "flex", "flex-direction": "column", "align-items": "center", gap: "8px" }}>
       <div
+        ref={containerRef}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         style={{
           width: "512px",
-          height: "512px",
           "max-width": "100%",
+          "max-height": "calc(100vh - 280px)",
+          "min-height": "256px",
           "aspect-ratio": "1",
-          "flex-shrink": "0",
           background: "var(--bg-secondary)",
           "border-radius": "var(--radius)",
           border: `2px ${dragOver() ? "solid var(--accent)" : "dashed var(--border)"}`,
@@ -122,8 +144,8 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
             alt="Input image"
           />
           <MaskCanvas
-            containerWidth={containerSize}
-            containerHeight={containerSize}
+            containerWidth={containerW()}
+            containerHeight={containerH()}
             imgNaturalWidth={imgNaturalWidth()}
             imgNaturalHeight={imgNaturalHeight()}
             brushSize={brushSize()}
