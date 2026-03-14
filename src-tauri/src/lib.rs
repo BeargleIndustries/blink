@@ -47,6 +47,11 @@ pub fn run() {
             commands::gallery::export_image,
             commands::gallery::save_to_gallery,
             commands::gallery::load_gallery_image,
+            commands::upscaler::load_upscaler,
+            commands::upscaler::upscale_image,
+            commands::upscaler::unload_upscaler,
+            commands::video::generate_video,
+            commands::models::scan_lora_directory,
         ])
         .run(tauri::generate_context!())
         .expect("error while running blink");

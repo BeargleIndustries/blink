@@ -538,6 +538,8 @@ pub async fn set_active_model(
             t5xxl_path: None,
             diffusion_model_path: None,
             llm_path: None,
+            control_net_path: None,
+            taesd_path: None,
         };
         state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
         let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
@@ -579,6 +581,8 @@ pub async fn set_active_model(
             t5xxl_path: path_for_role("t5xxl"),
             vae_path: path_for_role("vae"),
             llm_path: path_for_role("llm"),
+            control_net_path: None,
+            taesd_path: None,
         }
     } else {
         // Single-file model (SD1.5, SDXL, etc.)
@@ -593,6 +597,8 @@ pub async fn set_active_model(
             t5xxl_path: None,
             diffusion_model_path: None,
             llm_path: None,
+            control_net_path: None,
+            taesd_path: None,
         }
     };
 
@@ -757,6 +763,43 @@ fn parse_hf_url(url: &str) -> Result<(String, String), String> {
     }
 
     Err("Unrecognized URL format. Use:\n  https://huggingface.co/owner/repo/blob/main/model.gguf\n  owner/repo:model.gguf".to_string())
+}
+
+#[derive(serde::Serialize)]
+pub struct LoraFileInfo {
+    pub path: String,
+    pub filename: String,
+    pub size_bytes: u64,
+}
+
+#[tauri::command]
+pub async fn scan_lora_directory(path: String) -> Result<Vec<LoraFileInfo>, String> {
+    if path.contains("..") {
+        return Err("Invalid path".to_string());
+    }
+    let dir = std::path::Path::new(&path);
+    if !dir.is_dir() {
+        return Ok(vec![]);
+    }
+    let mut results = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                let ext = ext.to_string_lossy().to_lowercase();
+                if ext == "safetensors" || ext == "gguf" {
+                    if let Ok(meta) = entry.metadata() {
+                        results.push(LoraFileInfo {
+                            path: path.to_string_lossy().to_string(),
+                            filename: path.file_name().unwrap_or_default().to_string_lossy().to_string(),
+                            size_bytes: meta.len(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(results)
 }
 
 fn unix_timestamp() -> String {

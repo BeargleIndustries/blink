@@ -10,6 +10,10 @@ use crate::error::SdError;
 use crate::progress::{ProgressCallback, ProgressUpdate};
 use crate::types::*;
 
+/// Callback type for live preview frames during generation.
+/// Arguments: step, RGBA pixel data, width, height
+pub type PreviewCallback = Box<dyn Fn(i32, Vec<u8>, u32, u32) + Send>;
+
 /// Thin owning wrapper around `*mut sd_sys::sd_ctx_t`.
 /// Freed on drop via `sd_sys::free_sd_ctx`.
 pub(crate) struct SdCppContext {
@@ -21,7 +25,13 @@ pub(crate) struct SdCppContext {
 unsafe impl Send for SdCppContext {}
 
 impl SdCppContext {
-    /// Load a model and create the sd.cpp context.
+    /// Return the raw context pointer for FFI calls that need it directly (e.g. `generate_video`).
+    /// Safety: valid as long as this `SdCppContext` is alive.
+    pub(crate) fn raw_ptr(&self) -> *mut sd_sys::sd_ctx_t {
+        self.ctx
+    }
+
+        /// Load a model and create the sd.cpp context.
     pub(crate) fn new(config: &ContextConfig) -> Result<Self, SdError> {
         // Validate that at least one model path is provided
         if config.model_path.is_none() && config.diffusion_model_path.is_none() {
@@ -87,6 +97,20 @@ impl SdCppContext {
                 reason: "llm_path contains interior NUL byte".into(),
             })?;
 
+        let control_net_path_c = config.control_net_path.as_ref()
+            .map(|p| CString::new(p.as_str()))
+            .transpose()
+            .map_err(|_| SdError::InvalidParams {
+                reason: "control_net_path contains interior NUL byte".into(),
+            })?;
+
+        let taesd_path_c = config.taesd_path.as_ref()
+            .map(|p| CString::new(p.as_str()))
+            .transpose()
+            .map_err(|_| SdError::InvalidParams {
+                reason: "taesd_path contains interior NUL byte".into(),
+            })?;
+
         unsafe {
             // Install sd.cpp log callback so we can see CUDA init, backend selection, etc.
             sd_sys::sd_set_log_callback(Some(sd_log_trampoline), std::ptr::null_mut());
@@ -111,6 +135,12 @@ impl SdCppContext {
             }
             if let Some(ref llm) = llm_path_c {
                 params.llm_path = llm.as_ptr();
+            }
+            if let Some(ref cn) = control_net_path_c {
+                params.control_net_path = cn.as_ptr();
+            }
+            if let Some(ref taesd) = taesd_path_c {
+                params.taesd_path = taesd.as_ptr();
             }
             params.n_threads = config.n_threads;
             params.vae_decode_only = false; // need encoder for img2img
@@ -155,7 +185,11 @@ impl SdCppContext {
         mask_image: Option<&[u8]>,
         strength: f32,
         progress_cb: Option<ProgressCallback>,
+        preview_cb: Option<PreviewCallback>,
         cancel_flag: &AtomicBool,
+        ref_images: Option<&[Vec<u8>]>,
+        control_image: Option<&[u8]>,
+        control_strength: Option<f32>,
     ) -> Result<GeneratedImage, SdError> {
         // Pre-flight cancel check
         if cancel_flag.load(Ordering::SeqCst) {
@@ -230,6 +264,66 @@ impl SdCppContext {
             img2img_height = h;
         }
 
+        // --- Decode ref images for Kontext ---
+        let mut ref_rgb_bufs: Vec<Vec<u8>> = Vec::new();
+        let mut ref_sd_images: Vec<sd_sys::sd_image_t> = Vec::new();
+        if let Some(ref_imgs) = ref_images {
+            for (i, img_bytes) in ref_imgs.iter().enumerate() {
+                let img = image::load_from_memory(img_bytes).map_err(|e| SdError::InvalidParams {
+                    reason: format!("Failed to decode ref_image[{}]: {}", i, e),
+                })?;
+                let rgb = img.to_rgb8();
+                let (w, h) = rgb.dimensions();
+                let mut raw = rgb.into_raw();
+                ref_sd_images.push(sd_sys::sd_image_t {
+                    width: w,
+                    height: h,
+                    channel: 3,
+                    data: raw.as_mut_ptr(),
+                });
+                ref_rgb_bufs.push(raw);
+            }
+        }
+
+        // --- Build LoRA structs ---
+        let lora_path_cstrings: Vec<CString> = params.loras.iter()
+            .map(|l| CString::new(l.path.as_str()).map_err(|_| SdError::InvalidParams {
+                reason: format!("LoRA path contains interior NUL byte: {}", l.path),
+            }))
+            .collect::<Result<Vec<_>, _>>()?;
+        let lora_structs: Vec<sd_sys::sd_lora_t> = params.loras.iter()
+            .zip(lora_path_cstrings.iter())
+            .map(|(lora, cpath)| sd_sys::sd_lora_t {
+                is_high_noise: lora.is_high_noise,
+                multiplier: lora.multiplier,
+                path: cpath.as_ptr(),
+            })
+            .collect();
+
+        // --- Decode control image ---
+        #[allow(unused_assignments)]
+        let mut control_rgb: Vec<u8> = Vec::new();
+        let mut control_sd_image = sd_sys::sd_image_t {
+            width: 0,
+            height: 0,
+            channel: 0,
+            data: std::ptr::null_mut(),
+        };
+        if let Some(ctrl_bytes) = control_image {
+            let img = image::load_from_memory(ctrl_bytes).map_err(|e| SdError::InvalidParams {
+                reason: format!("Failed to decode control image: {}", e),
+            })?;
+            let rgb = img.to_rgb8();
+            let (w, h) = rgb.dimensions();
+            control_rgb = rgb.into_raw();
+            control_sd_image = sd_sys::sd_image_t {
+                width: w,
+                height: h,
+                channel: 3,
+                data: control_rgb.as_mut_ptr(),
+            };
+        }
+
         // Set up progress trampoline — heap-allocated so it outlives any early return
         // from generate() while sd.cpp's global callback is still set.
         let trampoline_data = Box::new(ProgressTrampolineData {
@@ -237,12 +331,32 @@ impl SdCppContext {
         });
         let trampoline_ptr = Box::into_raw(trampoline_data);
 
+        // Set up preview trampoline if callback provided
+        let preview_trampoline_ptr = if let Some(pcb) = preview_cb {
+            let data = Box::new(PreviewTrampolineData { callback: pcb });
+            Box::into_raw(data)
+        } else {
+            std::ptr::null_mut()
+        };
+
         unsafe {
             // Install progress callback (GLOBAL in sd.cpp)
             sd_sys::sd_set_progress_callback(
                 Some(progress_trampoline),
                 trampoline_ptr as *mut c_void,
             );
+
+            // Install preview callback if requested
+            if !preview_trampoline_ptr.is_null() {
+                sd_sys::sd_set_preview_callback(
+                    Some(preview_trampoline),
+                    sd_sys::preview_t_PREVIEW_TAE, // TAE preview mode
+                    3,     // interval: every 3 steps
+                    true,  // denoised
+                    false, // noisy
+                    preview_trampoline_ptr as *mut c_void,
+                );
+            }
 
             // Build generation params
             let mut gen_params: sd_sys::sd_img_gen_params_t = std::mem::zeroed();
@@ -275,7 +389,31 @@ impl SdCppContext {
                 sample_params.scheduler = sd_sys::scheduler_t_KARRAS_SCHEDULER;
             }
 
+            // Image conditioning strength (Kontext)
+            if let Some(img_cfg) = params.img_cfg {
+                sample_params.guidance.img_cfg = img_cfg;
+            }
+
             gen_params.sample_params = sample_params;
+
+            // Ref images (Kontext editing)
+            if !ref_sd_images.is_empty() {
+                gen_params.ref_images = ref_sd_images.as_mut_ptr();
+                gen_params.ref_images_count = ref_sd_images.len() as i32;
+                gen_params.auto_resize_ref_image = true;
+            }
+
+            // LoRA adapters
+            if !lora_structs.is_empty() {
+                gen_params.loras = lora_structs.as_ptr();
+                gen_params.lora_count = lora_structs.len() as u32;
+            }
+
+            // ControlNet
+            if control_image.is_some() {
+                gen_params.control_image = control_sd_image;
+                gen_params.control_strength = control_strength.unwrap_or(0.9);
+            }
 
             eprintln!("[blink] sample_method={}, scheduler={}, steps={}, cfg={}",
                 user_method, sample_params.scheduler, params.steps, params.cfg_scale);
@@ -322,11 +460,15 @@ impl SdCppContext {
 
             let result_ptr = sd_sys::generate_image(self.ctx, &gen_params);
 
-            // Clear progress callback immediately, then reclaim the boxed trampoline data.
+            // Clear callbacks immediately, then reclaim the boxed trampoline data.
             // Must happen in this order: clear first so sd.cpp can no longer call into it,
             // then drop the box.
             sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
             let _ = Box::from_raw(trampoline_ptr);
+            if !preview_trampoline_ptr.is_null() {
+                sd_sys::sd_set_preview_callback(None, sd_sys::preview_t_PREVIEW_NONE, 0, false, false, std::ptr::null_mut());
+                let _ = Box::from_raw(preview_trampoline_ptr);
+            }
 
             if result_ptr.is_null() {
                 return Err(SdError::InferenceReturnedNull);
@@ -458,6 +600,106 @@ unsafe extern "C" fn progress_trampoline(step: c_int, steps: c_int, time: f32, d
 }
 
 // ---------------------------------------------------------------------------
+// Preview callback trampoline
+// ---------------------------------------------------------------------------
+
+struct PreviewTrampolineData {
+    callback: PreviewCallback,
+}
+
+/// C-compatible callback forwarded from sd.cpp's global preview system.
+unsafe extern "C" fn preview_trampoline(
+    step: c_int,
+    frame_count: c_int,
+    frames: *mut sd_sys::sd_image_t,
+    _is_noisy: bool,
+    data: *mut c_void,
+) {
+    if data.is_null() || frames.is_null() || frame_count < 1 {
+        return;
+    }
+    let cb_data = &*(data as *const PreviewTrampolineData);
+    let frame = &*frames; // take first frame
+    let w = frame.width;
+    let h = frame.height;
+    let ch = frame.channel as usize;
+    if frame.data.is_null() || w == 0 || h == 0 {
+        return;
+    }
+    let pixel_count = (w as usize) * (h as usize) * ch;
+    let src = std::slice::from_raw_parts(frame.data, pixel_count);
+
+    // Convert to RGBA
+    let rgba = if ch == 3 {
+        let mut buf = Vec::with_capacity((w as usize) * (h as usize) * 4);
+        for pixel in src.chunks_exact(3) {
+            buf.push(pixel[0]);
+            buf.push(pixel[1]);
+            buf.push(pixel[2]);
+            buf.push(255);
+        }
+        buf
+    } else {
+        src.to_vec()
+    };
+
+    (cb_data.callback)(step, rgba, w, h);
+}
+
+// ---------------------------------------------------------------------------
+// Canny edge detection preprocessor
+// ---------------------------------------------------------------------------
+
+/// Preprocess an image with Canny edge detection for ControlNet.
+/// Returns PNG-encoded edge map.
+pub fn preprocess_canny(
+    image_data: &[u8],
+    high_threshold: f32,
+    low_threshold: f32,
+    weak: f32,
+    strong: f32,
+    inverse: bool,
+) -> Result<Vec<u8>, SdError> {
+    let img = image::load_from_memory(image_data).map_err(|e| SdError::InvalidParams {
+        reason: format!("Failed to decode image for canny preprocessing: {}", e),
+    })?;
+    let rgb = img.to_rgb8();
+    let (w, h) = rgb.dimensions();
+    let mut raw = rgb.into_raw();
+
+    let sd_img = sd_sys::sd_image_t {
+        width: w,
+        height: h,
+        channel: 3,
+        data: raw.as_mut_ptr(),
+    };
+
+    let success = unsafe {
+        sd_sys::preprocess_canny(sd_img, high_threshold, low_threshold, weak, strong, inverse)
+    };
+
+    if !success {
+        return Err(SdError::InvalidParams {
+            reason: "Canny edge detection preprocessing failed".into(),
+        });
+    }
+
+    // Encode the modified image data as PNG
+    use image::{ImageBuffer, Rgb};
+    let out_img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(w, h, raw)
+        .ok_or_else(|| SdError::InvalidParams {
+            reason: "Failed to create image buffer from canny output".into(),
+        })?;
+    let mut png_bytes: Vec<u8> = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut png_bytes);
+    out_img.write_to(&mut cursor, image::ImageFormat::Png).map_err(|e| SdError::InvalidParams {
+        reason: format!("Failed to encode canny output as PNG: {}", e),
+    })?;
+
+    Ok(png_bytes)
+}
+
+// ---------------------------------------------------------------------------
 // SampleMethod → C enum conversion
 // ---------------------------------------------------------------------------
 
@@ -537,6 +779,8 @@ mod tests {
             keep_clip_on_cpu: false,
             keep_vae_on_cpu: false,
             offload_params_to_cpu: false,
+            control_net_path: None,
+            taesd_path: None,
         };
         let result = SdCppContext::new(&config);
         assert!(result.is_err());

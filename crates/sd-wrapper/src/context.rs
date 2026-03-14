@@ -3,22 +3,33 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 use crate::error::SdError;
-use crate::ffi_bridge::SdCppContext;
+use crate::ffi_bridge::{SdCppContext, PreviewCallback};
 use crate::types::*;
 use crate::progress::ProgressCallback;
+use crate::video::{self, VideoGenParams};
 
 pub enum InferenceCommand {
     Txt2Img {
         params: GenerationParams,
+        ref_images: Vec<Vec<u8>>,
         progress_cb: Option<ProgressCallback>,
+        preview_cb: Option<PreviewCallback>,
         result_tx: mpsc::Sender<Result<GeneratedImage, SdError>>,
     },
     Img2Img {
         input_image: Vec<u8>,
         mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
+        control_image: Option<Vec<u8>>,
+        control_strength: Option<f32>,
         progress_cb: Option<ProgressCallback>,
+        preview_cb: Option<PreviewCallback>,
         result_tx: mpsc::Sender<Result<GeneratedImage, SdError>>,
+    },
+    VideoGen {
+        params: VideoGenParams,
+        progress_cb: Option<ProgressCallback>,
+        result_tx: mpsc::Sender<Result<Vec<crate::types::GeneratedImage>, SdError>>,
     },
     Shutdown,
 }
@@ -87,20 +98,25 @@ impl SdContext {
 
                 while let Ok(cmd) = command_rx.recv() {
                     match cmd {
-                        InferenceCommand::Txt2Img { params, progress_cb, result_tx } => {
+                        InferenceCommand::Txt2Img { params, ref_images, progress_cb, preview_cb, result_tx } => {
                             log::info!("Starting txt2img: {}x{}, {} steps", params.width, params.height, params.steps);
                             thread_cancel.store(false, Ordering::SeqCst);
+                            let ref_imgs_opt = if ref_images.is_empty() { None } else { Some(ref_images.as_slice()) };
                             let result = cpp_ctx.generate(
                                 &params,
                                 None,   // no input image for txt2img
                                 None,   // no mask for txt2img
                                 0.0,    // strength unused for txt2img
                                 progress_cb,
+                                preview_cb,
                                 &thread_cancel,
+                                ref_imgs_opt,
+                                None,   // no control image for txt2img
+                                None,   // no control strength for txt2img
                             );
                             let _ = result_tx.send(result);
                         }
-                        InferenceCommand::Img2Img { input_image, mask_image, params, progress_cb, result_tx } => {
+                        InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx } => {
                             thread_cancel.store(false, Ordering::SeqCst);
                             let result = cpp_ctx.generate(
                                 &params.base,
@@ -108,8 +124,17 @@ impl SdContext {
                                 mask_image.as_deref(),
                                 params.strength,
                                 progress_cb,
+                                preview_cb,
                                 &thread_cancel,
+                                None,   // no ref_images for img2img
+                                control_image.as_deref(),
+                                control_strength,
                             );
+                            let _ = result_tx.send(result);
+                        }
+                        InferenceCommand::VideoGen { params, progress_cb, result_tx } => {
+                            thread_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+                            let result = video::generate_video(&cpp_ctx, &params, progress_cb, &thread_cancel);
                             let _ = result_tx.send(result);
                         }
                         InferenceCommand::Shutdown => {
@@ -157,11 +182,13 @@ impl SdContext {
     pub fn txt2img(
         &self,
         params: GenerationParams,
+        ref_images: Vec<Vec<u8>>,
         progress_cb: Option<ProgressCallback>,
+        preview_cb: Option<PreviewCallback>,
     ) -> Result<GeneratedImage, SdError> {
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
-            .send(InferenceCommand::Txt2Img { params, progress_cb, result_tx })
+            .send(InferenceCommand::Txt2Img { params, ref_images, progress_cb, preview_cb, result_tx })
             .map_err(|_| SdError::ContextCreationFailed {
                 reason: "Inference thread has stopped".into(),
             })?;
@@ -181,11 +208,14 @@ impl SdContext {
         input_image: Vec<u8>,
         mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
+        control_image: Option<Vec<u8>>,
+        control_strength: Option<f32>,
         progress_cb: Option<ProgressCallback>,
+        preview_cb: Option<PreviewCallback>,
     ) -> Result<GeneratedImage, SdError> {
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
-            .send(InferenceCommand::Img2Img { input_image, mask_image, params, progress_cb, result_tx })
+            .send(InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx })
             .map_err(|_| SdError::ContextCreationFailed {
                 reason: "Inference thread has stopped".into(),
             })?;
@@ -196,6 +226,28 @@ impl SdContext {
             },
             mpsc::RecvTimeoutError::Disconnected => SdError::FfiPanic {
                 message: "Inference thread crashed during generation".into(),
+            },
+        })?
+    }
+
+    pub fn generate_video(
+        &self,
+        params: VideoGenParams,
+        progress_cb: Option<ProgressCallback>,
+    ) -> Result<Vec<crate::types::GeneratedImage>, SdError> {
+        let (result_tx, result_rx) = mpsc::channel();
+        self.command_tx
+            .send(InferenceCommand::VideoGen { params, progress_cb, result_tx })
+            .map_err(|_| SdError::ContextCreationFailed {
+                reason: "Inference thread has stopped".into(),
+            })?;
+
+        result_rx.recv_timeout(std::time::Duration::from_secs(3600)).map_err(|e| match e {
+            mpsc::RecvTimeoutError::Timeout => SdError::FfiPanic {
+                message: "Video generation timed out after 60 minutes".into(),
+            },
+            mpsc::RecvTimeoutError::Disconnected => SdError::FfiPanic {
+                message: "Inference thread crashed during video generation".into(),
             },
         })?
     }

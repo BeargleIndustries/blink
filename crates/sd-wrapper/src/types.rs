@@ -18,6 +18,17 @@ pub struct ContextConfig {
     pub keep_clip_on_cpu: bool,
     pub keep_vae_on_cpu: bool,
     pub offload_params_to_cpu: bool,
+    // ControlNet model path
+    pub control_net_path: Option<String>,
+    // TAESD model path for live previews
+    pub taesd_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LoraConfig {
+    pub path: String,
+    pub multiplier: f32,
+    pub is_high_noise: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -31,6 +42,12 @@ pub struct GenerationParams {
     pub seed: i64,
     pub sample_method: SampleMethod,
     pub batch_count: u32,
+    // Kontext ref images for image editing
+    pub ref_images: Vec<Vec<u8>>,
+    // Image conditioning strength (Kontext)
+    pub img_cfg: Option<f32>,
+    // LoRA adapters
+    pub loras: Vec<LoraConfig>,
 }
 
 impl Default for GenerationParams {
@@ -45,6 +62,9 @@ impl Default for GenerationParams {
             seed: -1,
             sample_method: SampleMethod::EulerA,
             batch_count: 1,
+            ref_images: Vec::new(),
+            img_cfg: None,
+            loras: Vec::new(),
         }
     }
 }

@@ -1,6 +1,6 @@
 import { Component, createSignal, onMount, onCleanup, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, PerfSettings, FileDownloadProgress } from "./lib/types";
+import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, PerfSettings, FileDownloadProgress, LoraConfig } from "./lib/types";
 import {
   generateImage,
   cancelGeneration,
@@ -47,6 +47,7 @@ const App: Component = () => {
   const [totalSteps, setTotalSteps] = createSignal(0);
   const [elapsed, setElapsed] = createSignal(0);
   const [generatedImage, setGeneratedImage] = createSignal<string | null>(null);
+  const [previewImage, setPreviewImage] = createSignal<string | null>(null);
   const [inputImage, setInputImage] = createSignal<string | null>(null);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
   const [modelLoading, setModelLoading] = createSignal(false);
@@ -73,6 +74,17 @@ const App: Component = () => {
   const [sampler, setSampler] = createSignal("euler_a");
   const [strength, setStrength] = createSignal(0.75);
 
+  // Kontext / edit mode
+  const [editMode, setEditMode] = createSignal(false);
+  const [imgCfg, setImgCfg] = createSignal(1.5);
+
+  // LoRA
+  const [loras, setLoras] = createSignal<LoraConfig[]>([]);
+
+  // ControlNet
+  const [controlNetEnabled, setControlNetEnabled] = createSignal(false);
+  const [controlStrength, setControlStrength] = createSignal(0.75);
+
   // Track last generation params for gallery save
   let lastPrompt = "";
   let lastNegativePrompt = "";
@@ -80,7 +92,10 @@ const App: Component = () => {
   // ImageCanvas API ref for mask access
   let imageCanvasApi: ImageCanvasAPI | undefined;
 
-  const mode = () => (inputImage() ? "img2img" : "txt2img");
+  const mode = () => {
+    if (!inputImage()) return "txt2img";
+    return editMode() ? "edit" : "img2img";
+  };
 
   const activeModel = () => models().find((m) => m.active) ?? null;
 
@@ -98,7 +113,6 @@ const App: Component = () => {
   onCleanup(() => unlisteners.forEach((fn) => fn()));
 
   onMount(async () => {
-    // Load data
     try {
       const [loadedModels, sysInfo, gallery, perf, token] = await Promise.all([
         getModels(),
@@ -128,7 +142,6 @@ const App: Component = () => {
       console.error("Failed to initialize:", err);
     }
 
-    // Tauri event listeners — store unlisten fns for cleanup
     unlisteners = await Promise.all([
       listen<GenerationProgress>("generation:progress", (event) => {
         setCurrentStep(event.payload.step);
@@ -136,18 +149,21 @@ const App: Component = () => {
         setElapsed(event.payload.elapsed_secs);
       }),
 
+      listen<{ image_base64: string; width: number; height: number }>("generation:preview", (event) => {
+        setPreviewImage(event.payload.image_base64);
+      }),
+
       listen<{ image_base64: string; width: number; height: number; seed: number; generation_time_secs: number }>("generation:complete", async (event) => {
         setGenerating(false);
         setGeneratedImage(event.payload.image_base64);
-        setInputImage(null); // Clear input so generated result displays
+        setPreviewImage(null);
+        setInputImage(null);
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
         setErrorMessage(null);
-        // Clear inpaint mask after generation
         imageCanvasApi?.clearMask();
 
-        // Auto-save to gallery
         const model = activeModel();
         try {
           const item = await saveToGallery({
@@ -173,17 +189,18 @@ const App: Component = () => {
 
       listen<{ message: string; recovery: string | null }>("generation:error", (event) => {
         setGenerating(false);
+        setPreviewImage(null);
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
         setErrorMessage(event.payload.message);
         console.error("Generation error:", event.payload.message);
-        // Auto-clear error after 5s
         setTimeout(() => setErrorMessage(null), 5000);
       }),
 
       listen("generation:cancelled", () => {
         setGenerating(false);
+        setPreviewImage(null);
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
@@ -226,11 +243,11 @@ const App: Component = () => {
     lastNegativePrompt = negativePrompt;
     setGenerating(true);
     setGeneratedImage(null);
+    setPreviewImage(null);
     setCurrentStep(0);
     setTotalSteps(0);
 
     try {
-      // Convert inputImage dataURL to bytes if present
       let inputBytes: number[] | undefined;
       if (inputImage()) {
         const base64 = inputImage()!.split(",")[1];
@@ -238,9 +255,10 @@ const App: Component = () => {
         inputBytes = Array.from(binary, (c) => c.charCodeAt(0));
       }
 
-      // Get mask bytes if a mask was drawn
+      const isEditMode = mode() === "edit";
+
       let maskBytes: number[] | undefined;
-      if (inputBytes) {
+      if (inputBytes && !isEditMode) {
         const mask = imageCanvasApi?.getMask();
         if (mask) maskBytes = mask;
       }
@@ -254,9 +272,13 @@ const App: Component = () => {
         cfg_scale: cfgScale(),
         seed: seed(),
         sampler: sampler(),
-        input_image: inputBytes,
-        mask_image: maskBytes,
-        strength: inputBytes ? strength() : undefined,
+        input_image: isEditMode ? undefined : inputBytes,
+        mask_image: isEditMode ? undefined : maskBytes,
+        strength: (!isEditMode && inputBytes) ? strength() : undefined,
+        ref_images: (isEditMode && inputBytes) ? [inputBytes] : undefined,
+        img_cfg: isEditMode ? imgCfg() : undefined,
+        loras: loras().length > 0 ? loras() : undefined,
+        control_strength: controlNetEnabled() ? controlStrength() : undefined,
       });
     } catch (err) {
       setGenerating(false);
@@ -299,7 +321,6 @@ const App: Component = () => {
     try {
       setDownloading(modelId);
       await downloadModel(modelId);
-      // Don't close wizard here — wait for download_complete event
     } catch (err) {
       setDownloading(null);
       console.error("Failed to download model:", err);
@@ -322,7 +343,7 @@ const App: Component = () => {
   const handleGallerySelect = async (item: GalleryItem) => {
     try {
       const base64 = await loadGalleryImage(item.id);
-      setInputImage(null); // clear img2img input so gallery image displays
+      setInputImage(null);
       setGeneratedImage(base64);
     } catch (err) {
       console.error("Failed to load gallery image:", err);
@@ -354,6 +375,7 @@ const App: Component = () => {
 
   const handleClearImage = () => {
     setInputImage(null);
+    setEditMode(false);
   };
 
   return (
@@ -365,7 +387,6 @@ const App: Component = () => {
       color: "var(--text-primary)",
       overflow: "hidden",
     }}>
-      {/* Header */}
       <header style={{
         display: "flex",
         "align-items": "center",
@@ -441,7 +462,6 @@ const App: Component = () => {
         </div>
       </header>
 
-      {/* Main Content */}
       <main style={{
         flex: "1",
         display: "flex",
@@ -458,8 +478,78 @@ const App: Component = () => {
           onImageDrop={handleImageDrop}
           onClearImage={handleClearImage}
           inputImage={inputImage()}
+          previewImage={previewImage()}
           ref={(api) => { imageCanvasApi = api; }}
         />
+
+        <Show when={inputImage()}>
+          <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+            <button
+              onClick={() => setEditMode(false)}
+              style={{
+                padding: "4px 12px",
+                background: !editMode() ? "var(--accent)" : "var(--bg-tertiary)",
+                border: `1px solid ${!editMode() ? "var(--accent)" : "var(--border)"}`,
+                "border-radius": "var(--radius)",
+                color: !editMode() ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                "font-size": "12px",
+                transition: "all 0.15s",
+              }}
+            >
+              img2img
+            </button>
+            <button
+              onClick={() => setEditMode(true)}
+              style={{
+                padding: "4px 12px",
+                background: editMode() ? "var(--accent)" : "var(--bg-tertiary)",
+                border: `1px solid ${editMode() ? "var(--accent)" : "var(--border)"}`,
+                "border-radius": "var(--radius)",
+                color: editMode() ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                "font-size": "12px",
+                transition: "all 0.15s",
+              }}
+            >
+              Edit Mode
+            </button>
+            <Show when={editMode()}>
+              <span style={{ "font-size": "11px", color: "var(--text-muted)", opacity: "0.6" }}>
+                Kontext — describe the edit
+              </span>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={inputImage() && editMode()}>
+          <div style={{
+            display: "flex",
+            "align-items": "center",
+            gap: "8px",
+            width: "100%",
+            "max-width": "700px",
+            padding: "8px 12px",
+            background: "var(--bg-secondary)",
+            "border-radius": "var(--radius)",
+          }}>
+            <span style={{ "font-size": "12px", color: "var(--text-secondary)", "min-width": "110px" }}>
+              Image Conditioning
+            </span>
+            <input
+              type="range"
+              min="0.5"
+              max="3.0"
+              step="0.05"
+              value={imgCfg()}
+              onInput={(e) => setImgCfg(parseFloat(e.currentTarget.value))}
+              style={{ flex: "1" }}
+            />
+            <span style={{ "font-size": "13px", "min-width": "35px" }}>
+              {imgCfg().toFixed(2)}
+            </span>
+          </div>
+        </Show>
 
         <ProgressBar
           step={currentStep()}
@@ -489,7 +579,7 @@ const App: Component = () => {
           generating={generating()}
           modelLoading={modelLoading()}
           modelReady={!!activeModelId() && !modelLoading()}
-          mode={mode()}
+          mode={(mode() === "edit" ? "img2img" : mode()) as "txt2img" | "img2img"}
         />
 
         <SettingsPanel
@@ -512,10 +602,16 @@ const App: Component = () => {
           onPerfChange={handlePerfChange}
           hfToken={hfToken()}
           onHfTokenChange={handleHfTokenChange}
+          controlNetEnabled={controlNetEnabled()}
+          onControlNetChange={setControlNetEnabled}
+          controlStrength={controlStrength()}
+          onControlStrengthChange={setControlStrength}
+          showControlNet={mode() === "img2img"}
+          loras={loras()}
+          onLorasChange={setLoras}
         />
       </main>
 
-      {/* Gallery Footer */}
       <footer style={{
         padding: "8px 16px",
         background: "var(--bg-secondary)",
@@ -532,7 +628,6 @@ const App: Component = () => {
         />
       </footer>
 
-      {/* Modals */}
       <Show when={showWizard()}>
         <FirstRunWizard
           models={models()}

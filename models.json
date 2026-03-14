@@ -264,6 +264,276 @@
       "recommended_for": ["quality"]
     },
     {
+      "id": "flux-kontext-dev-q4",
+      "name": "FLUX.1 Kontext Dev (Q4)",
+      "description": "Text-guided image editing. Load a reference image and describe changes.",
+      "sha256": "pending-verification",
+      "size_bytes": 9400000000,
+      "vram_mb": 12000,
+      "architecture": "flux-kontext",
+      "category": "image-editing",
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 25,
+      "default_cfg": 3.5,
+      "default_sampler": "euler",
+      "license": {
+        "name": "FLUX.1 Kontext Dev Non-Commercial",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-Kontext-dev/blob/main/LICENSE.md",
+        "commercial": false
+      },
+      "tier": 2,
+      "available": true,
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "QuantStack/FLUX.1-Kontext-dev-GGUF",
+          "filename": "flux1-kontext-dev-Q4_K_S.gguf",
+          "size_bytes": 6400000000,
+          "required": true
+        },
+        {
+          "role": "clip_l",
+          "repo": "comfyanonymous/flux_text_encoders",
+          "filename": "clip_l.safetensors",
+          "size_bytes": 300000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["image-editing", "inpainting"]
+    },
+    {
+      "id": "realesrgan-x4plus",
+      "name": "RealESRGAN x4 Plus",
+      "description": "4x image upscaling. Works with any generated image.",
+      "sha256": "pending-verification",
+      "size_bytes": 67000000,
+      "vram_mb": 1000,
+      "architecture": "esrgan",
+      "category": "upscaler",
+      "license": {
+        "name": "BSD 3-Clause",
+        "url": "https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "esrgan",
+          "repo": "ai-forever/Real-ESRGAN",
+          "filename": "RealESRGAN_x4.pth",
+          "size_bytes": 67000000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["upscaling"]
+    },
+    {
+      "id": "realesrgan-x4plus-anime",
+      "name": "RealESRGAN x4 Plus (Anime)",
+      "description": "4x upscaling optimized for anime-style images.",
+      "sha256": "pending-verification",
+      "size_bytes": 67000000,
+      "vram_mb": 1000,
+      "architecture": "esrgan",
+      "category": "upscaler",
+      "license": {
+        "name": "BSD 3-Clause",
+        "url": "https://github.com/xinntao/Real-ESRGAN/blob/master/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "esrgan",
+          "repo": "ai-forever/Real-ESRGAN",
+          "filename": "RealESRGAN_x4_anime.pth",
+          "size_bytes": 67000000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["upscaling", "anime"]
+    },
+    {
+      "id": "controlnet-canny-sd15",
+      "name": "ControlNet Canny (SD 1.5)",
+      "description": "Edge-guided generation for SD 1.5. Provide a canny edge map to control composition.",
+      "sha256": "pending-verification",
+      "size_bytes": 1450000000,
+      "vram_mb": 2000,
+      "architecture": "controlnet",
+      "category": "controlnet",
+      "license": {
+        "name": "OpenRAIL",
+        "url": "https://huggingface.co/lllyasviel/sd-controlnet-canny/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "control",
+          "repo": "lllyasviel/sd-controlnet-canny",
+          "filename": "diffusion_pytorch_model.safetensors",
+          "size_bytes": 1450000000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["controlled-generation", "composition"]
+    },
+    {
+      "id": "taesd-sd15",
+      "name": "TAESD Preview Decoder (SD 1.5)",
+      "description": "Tiny autoencoder for fast live-preview during SD 1.5 generation. ~5MB.",
+      "sha256": "pending-verification",
+      "size_bytes": 4900000,
+      "vram_mb": 100,
+      "architecture": "taesd",
+      "category": "preview",
+      "license": {
+        "name": "MIT",
+        "url": "https://github.com/madebyollin/taesd/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "taesd",
+          "repo": "madebyollin/taesd",
+          "filename": "taesd_decoder.safetensors",
+          "size_bytes": 4900000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["preview"]
+    },
+    {
+      "id": "taesd-sdxl",
+      "name": "TAESD Preview Decoder (SDXL)",
+      "description": "Tiny autoencoder for fast live-preview during SDXL generation. ~5MB.",
+      "sha256": "pending-verification",
+      "size_bytes": 4900000,
+      "vram_mb": 100,
+      "architecture": "taesd",
+      "category": "preview",
+      "license": {
+        "name": "MIT",
+        "url": "https://github.com/madebyollin/taesd/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "taesd",
+          "repo": "madebyollin/taesdxl",
+          "filename": "taesdxl_decoder.safetensors",
+          "size_bytes": 4900000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["preview"]
+    },
+    {
+      "id": "taesd-flux",
+      "name": "TAESD Preview Decoder (Flux)",
+      "description": "Tiny autoencoder for fast live-preview during Flux generation. ~5MB.",
+      "sha256": "pending-verification",
+      "size_bytes": 4900000,
+      "vram_mb": 100,
+      "architecture": "taesd",
+      "category": "preview",
+      "license": {
+        "name": "MIT",
+        "url": "https://github.com/madebyollin/taesd/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "files": [
+        {
+          "role": "taesd",
+          "repo": "madebyollin/taef1",
+          "filename": "taef1_decoder.safetensors",
+          "size_bytes": 4900000,
+          "required": true
+        }
+      ],
+      "recommended_for": ["preview"]
+    },
+    {
+      "id": "wan21-t2v-1.3b-q4",
+      "name": "Wan 2.1 Text-to-Video (1.3B, Q4)",
+      "description": "Open-source video generation. Generates short video clips from text prompts.",
+      "sha256": "pending-verification",
+      "size_bytes": 5000000000,
+      "vram_mb": 8000,
+      "architecture": "wan",
+      "category": "video",
+      "default_width": 832,
+      "default_height": 480,
+      "default_steps": 30,
+      "default_cfg": 6.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Wan-AI/Wan2.1-T2V-1.3B/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 2,
+      "available": true,
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "QuantStack/Wan2.1-T2V-1.3B-GGUF",
+          "filename": "wan2.1-t2v-1.3b-Q4_K_M.gguf",
+          "size_bytes": 2600000000,
+          "required": true,
+          "_note": "Verify exact filename at QuantStack/Wan2.1-T2V-1.3B-GGUF on HuggingFace"
+        },
+        {
+          "role": "clip_l",
+          "repo": "comfyanonymous/flux_text_encoders",
+          "filename": "clip_l.safetensors",
+          "size_bytes": 300000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Wan-AI/Wan2.1-T2V-1.3B",
+          "filename": "Wan2.1_VAE.pth",
+          "size_bytes": 400000000,
+          "required": true,
+          "_note": "Verify exact VAE filename at Wan-AI/Wan2.1-T2V-1.3B on HuggingFace"
+        }
+      ],
+      "recommended_for": ["video", "animation"]
+    },
+    {
       "id": "flux-schnell-q8",
       "name": "Flux.1 Schnell (Q8)",
       "available": false,

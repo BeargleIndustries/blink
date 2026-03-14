@@ -1,5 +1,6 @@
 import { Component, Show, createSignal } from "solid-js";
-import type { PerfSettings } from "../lib/types";
+import type { PerfSettings, LoraConfig } from "../lib/types";
+import LoraPicker from "./LoraPicker";
 
 interface SettingsPanelProps {
   steps: number;
@@ -21,6 +22,15 @@ interface SettingsPanelProps {
   onPerfChange: (settings: PerfSettings) => void;
   hfToken: string | null;
   onHfTokenChange: (token: string | null) => void;
+  // ControlNet
+  controlNetEnabled: boolean;
+  onControlNetChange: (v: boolean) => void;
+  controlStrength: number;
+  onControlStrengthChange: (v: number) => void;
+  showControlNet: boolean;
+  // LoRA
+  loras: LoraConfig[];
+  onLorasChange: (loras: LoraConfig[]) => void;
 }
 
 const SettingsPanel: Component<SettingsPanelProps> = (props) => {
@@ -199,6 +209,68 @@ const SettingsPanel: Component<SettingsPanelProps> = (props) => {
               <option value="lcm">LCM</option>
             </select>
           </div>
+
+          {/* ControlNet section */}
+          <Show when={props.showControlNet}>
+            <div style={{
+              "grid-column": "1 / -1",
+              "border-top": "1px solid var(--border)",
+              "padding-top": "8px",
+              "margin-top": "4px",
+            }}>
+              <div style={{ display: "flex", "align-items": "center", gap: "8px", "margin-bottom": "6px" }}>
+                <span style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600" }}>
+                  ControlNet
+                </span>
+                <Show when={props.controlNetEnabled}>
+                  <span style={{
+                    "font-size": "10px",
+                    color: "var(--warning)",
+                    background: "rgba(245, 158, 11, 0.1)",
+                    border: "1px solid rgba(245, 158, 11, 0.2)",
+                    "border-radius": "4px",
+                    padding: "1px 6px",
+                  }}>
+                    Requires model reload
+                  </span>
+                </Show>
+              </div>
+              <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
+                <ToggleOption
+                  label="Preserve Structure (Canny)"
+                  tooltip="Use ControlNet to preserve structural edges from the input image. Requires model reload when toggled."
+                  checked={props.controlNetEnabled}
+                  onChange={props.onControlNetChange}
+                />
+                <Show when={props.controlNetEnabled}>
+                  <div style={{ display: "flex", "align-items": "center", gap: "8px", "padding-left": "22px" }}>
+                    <span style={{ "font-size": "12px", color: "var(--text-secondary)", "min-width": "90px" }}>
+                      Control Strength
+                    </span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={props.controlStrength}
+                      onInput={(e) => props.onControlStrengthChange(parseFloat(e.currentTarget.value))}
+                      style={{ flex: "1" }}
+                    />
+                    <span style={{ "font-size": "12px", "min-width": "35px" }}>
+                      {props.controlStrength.toFixed(2)}
+                    </span>
+                  </div>
+                </Show>
+              </div>
+            </div>
+          </Show>
+
+          {/* LoRA section */}
+          <LoraPicker
+            loras={props.loras}
+            onLorasChange={props.onLorasChange}
+            visible={true}
+          />
 
           {/* HuggingFace Token section */}
           <div style={{

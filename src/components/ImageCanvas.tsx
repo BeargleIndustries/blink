@@ -8,6 +8,7 @@ interface ImageCanvasProps {
   onImageDrop: (imageData: string) => void;
   onClearImage: () => void;
   inputImage: string | null;
+  previewImage?: string | null;
   ref?: (api: ImageCanvasAPI) => void;
 }
 
@@ -164,6 +165,19 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
               "object-fit": "contain",
             }}
             alt="Generated image"
+          />
+        </Show>
+
+        <Show when={props.generating && props.previewImage && !props.inputImage}>
+          <img
+            src={props.previewImage!.startsWith("data:") ? props.previewImage! : `data:image/jpeg;base64,${props.previewImage}`}
+            style={{
+              "max-width": "100%",
+              "max-height": "100%",
+              "object-fit": "contain",
+              opacity: "0.85",
+            }}
+            alt="Preview"
           />
         </Show>
 

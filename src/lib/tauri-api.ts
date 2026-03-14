@@ -7,6 +7,8 @@ import type {
   AppSettings,
   GalleryItem,
   PerfSettings,
+  VideoRequest,
+  LoraFileInfo,
 } from "./types";
 
 export async function generateImage(request: GenerationRequest): Promise<string> {
@@ -127,4 +129,24 @@ export async function getHfToken(): Promise<string | null> {
 
 export async function setHfToken(token: string | null): Promise<void> {
   return invoke("set_hf_token", { token });
+}
+
+export async function loadUpscaler(modelPath: string): Promise<void> {
+  return invoke("load_upscaler", { modelPath });
+}
+
+export async function upscaleImage(imageBase64: string, factor: number): Promise<string> {
+  return invoke("upscale_image", { imageBase64, factor });
+}
+
+export async function unloadUpscaler(): Promise<void> {
+  return invoke("unload_upscaler");
+}
+
+export async function generateVideo(request: VideoRequest): Promise<string> {
+  return invoke("generate_video", { request });
+}
+
+export async function scanLoraDirectory(path: string): Promise<LoraFileInfo[]> {
+  return invoke("scan_lora_directory", { path });
 }

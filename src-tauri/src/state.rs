@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
-use sd_wrapper::{SdContext, ContextConfig};
+use sd_wrapper::{SdContext, ContextConfig, UpscalerContext};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,6 +37,7 @@ pub struct AppState {
     pub generating: AtomicBool,
     pub sd_context: Mutex<Option<SdContext>>,
     pub model_dir: Mutex<String>,
+    pub upscaler: Mutex<Option<UpscalerContext>>,
 }
 
 pub struct ModelPaths {
@@ -46,6 +47,8 @@ pub struct ModelPaths {
     pub t5xxl_path: Option<String>,
     pub diffusion_model_path: Option<String>,
     pub llm_path: Option<String>,
+    pub control_net_path: Option<String>,
+    pub taesd_path: Option<String>,
 }
 
 impl AppState {
@@ -67,6 +70,7 @@ impl AppState {
             generating: AtomicBool::new(false),
             sd_context: Mutex::new(None),
             model_dir: Mutex::new(model_dir.to_string_lossy().into_owned()),
+            upscaler: Mutex::new(None),
         })
     }
 
@@ -87,6 +91,8 @@ impl AppState {
             keep_clip_on_cpu: perf.keep_clip_on_cpu,
             keep_vae_on_cpu: perf.keep_vae_on_cpu,
             offload_params_to_cpu: perf.offload_params_to_cpu,
+            control_net_path: paths.control_net_path,
+            taesd_path: paths.taesd_path,
         };
         // Share cancel_flag so cancel_generation doesn't need to lock sd_context
         let ctx = SdContext::with_cancel_flag(config, self.cancel_flag.clone())?;

@@ -1,3 +1,8 @@
+export interface LoraConfig {
+  path: string;
+  multiplier: number;
+}
+
 export interface GenerationRequest {
   prompt: string;
   negative_prompt?: string;
@@ -10,6 +15,27 @@ export interface GenerationRequest {
   input_image?: number[];
   mask_image?: number[];
   strength?: number;
+  ref_images?: number[][];
+  img_cfg?: number;
+  loras?: LoraConfig[];
+  control_strength?: number;
+}
+
+export interface VideoRequest {
+  prompt: string;
+  negative_prompt?: string;
+  width: number;
+  height: number;
+  seed: number;
+  video_frames: number;
+  strength?: number;
+  input_image?: number[];
+}
+
+export interface LoraFileInfo {
+  path: string;
+  filename: string;
+  size_bytes: number;
 }
 
 export interface GenerationProgress {

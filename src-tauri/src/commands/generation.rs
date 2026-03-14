@@ -2,8 +2,14 @@ use tauri::{State, Emitter};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
-use sd_wrapper::{GenerationParams, Img2ImgParams, SampleMethod, ProgressUpdate};
+use sd_wrapper::{GenerationParams, Img2ImgParams, SampleMethod, ProgressUpdate, LoraConfig, PreviewCallback};
 use base64::Engine;
+
+#[derive(Debug, Deserialize)]
+pub struct LoraRequest {
+    pub path: String,
+    pub multiplier: f32,
+}
 
 #[derive(Debug, Deserialize)]
 pub struct GenerationRequest {
@@ -18,6 +24,10 @@ pub struct GenerationRequest {
     pub input_image: Option<Vec<u8>>,
     pub mask_image: Option<Vec<u8>>,
     pub strength: Option<f32>,
+    pub ref_images: Option<Vec<Vec<u8>>>,
+    pub img_cfg: Option<f32>,
+    pub loras: Option<Vec<LoraRequest>>,
+    pub control_strength: Option<f32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -76,6 +86,11 @@ pub async fn generate_image(
 
     let app_handle = state.app_handle.clone();
 
+    let loras: Vec<LoraConfig> = request.loras.unwrap_or_default()
+        .into_iter()
+        .map(|l| LoraConfig { path: l.path, multiplier: l.multiplier, is_high_noise: false })
+        .collect();
+
     let params = GenerationParams {
         prompt: request.prompt.clone(),
         negative_prompt: request.negative_prompt.clone().unwrap_or_default(),
@@ -86,12 +101,16 @@ pub async fn generate_image(
         seed: request.seed.unwrap_or(-1),
         sample_method: parse_sampler(request.sampler.as_deref().unwrap_or("euler_a")),
         batch_count: 1,
+        ref_images: request.ref_images.clone().unwrap_or_default(),
+        img_cfg: request.img_cfg,
+        loras,
     };
 
     let is_img2img = request.input_image.is_some();
     let input_image = request.input_image;
     let mask_image = request.mask_image;
     let strength = request.strength.unwrap_or(0.75);
+    let control_strength = request.control_strength;
     let seed = params.seed;
 
     // Set up progress callback that emits Tauri events
@@ -103,6 +122,25 @@ pub async fn generate_image(
             elapsed_secs: update.elapsed_secs,
         });
     });
+
+    // Set up preview callback that emits Tauri events with JPEG-encoded preview frames
+    let preview_handle = app_handle.clone();
+    let preview_cb: Option<PreviewCallback> = Some(Box::new(move |_step: i32, image_data: Vec<u8>, width: u32, height: u32| {
+        use image::{ImageBuffer, RgbaImage};
+        if let Some(img) = ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, image_data) {
+            let img: RgbaImage = img;
+            let mut jpeg_buf = Vec::new();
+            let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
+            if img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&jpeg_buf);
+                let _ = preview_handle.emit("generation:preview", serde_json::json!({
+                    "image_base64": b64,
+                    "width": width,
+                    "height": height,
+                }));
+            }
+        }
+    }));
 
     // Run generation — delegates to the inference thread internally
     let start = std::time::Instant::now();
@@ -123,9 +161,9 @@ pub async fn generate_image(
                 base: params.clone(),
                 strength,
             };
-            ctx.img2img(input_image.unwrap_or_default(), mask_image, img_params, Some(progress_cb))
+            ctx.img2img(input_image.unwrap_or_default(), mask_image, img_params, None, control_strength, Some(progress_cb), preview_cb)
         } else {
-            ctx.txt2img(params.clone(), Some(progress_cb))
+            ctx.txt2img(params.clone(), params.ref_images.clone(), Some(progress_cb), preview_cb)
         }
     };
 
