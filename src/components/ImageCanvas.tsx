@@ -97,6 +97,7 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
           height: "512px",
           "max-width": "100%",
           "aspect-ratio": "1",
+          "flex-shrink": "0",
           background: "var(--bg-secondary)",
           "border-radius": "var(--radius)",
           border: `2px ${dragOver() ? "solid var(--accent)" : "dashed var(--border)"}`,

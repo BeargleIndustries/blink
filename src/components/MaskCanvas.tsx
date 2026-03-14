@@ -198,6 +198,21 @@ const MaskCanvas: Component<MaskCanvasProps> = (props) => {
     }
     offCtx.putImageData(maskData, 0, 0);
 
+    // Feather/blur the mask edges for smoother blending (reduces hard seams)
+    // Apply a Gaussian-like blur by re-drawing the mask with blur filter
+    const blurRadius = Math.max(8, Math.round(canvasRef.width / 80)); // ~8-16px depending on image size
+    const blurCanvas = document.createElement("canvas");
+    blurCanvas.width = canvasRef.width;
+    blurCanvas.height = canvasRef.height;
+    const blurCtx = blurCanvas.getContext("2d");
+    if (blurCtx) {
+      blurCtx.filter = `blur(${blurRadius}px)`;
+      blurCtx.drawImage(offscreen, 0, 0);
+      // Copy blurred result back to offscreen
+      offCtx.clearRect(0, 0, offscreen.width, offscreen.height);
+      offCtx.drawImage(blurCanvas, 0, 0);
+    }
+
     const dataUrl = offscreen.toDataURL("image/png");
     const base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
     const binary = atob(base64);
