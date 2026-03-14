@@ -20,21 +20,34 @@ pub struct ManifestModel {
     pub repo: Option<String>,
     #[serde(default)]
     pub filename: Option<String>,
-    pub sha256: String,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
     pub size_bytes: u64,
+    #[serde(default)]
     pub vram_mb: u64,
     pub architecture: String,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default = "default_512")]
     pub default_width: u32,
+    #[serde(default = "default_512")]
     pub default_height: u32,
+    #[serde(default = "default_20")]
     pub default_steps: u32,
+    #[serde(default = "default_cfg_7")]
     pub default_cfg: f32,
+    #[serde(default = "default_sampler")]
     pub default_sampler: String,
-    pub license: ModelLicense,
+    #[serde(default)]
+    pub license: Option<ModelLicense>,
+    #[serde(default)]
     pub tier: u32,
     #[serde(default)]
     pub files: Option<Vec<ModelFile>>,
     #[serde(default = "default_true")]
     pub available: bool,
+    #[serde(default)]
     pub recommended_for: Vec<String>,
 }
 
@@ -48,6 +61,10 @@ pub struct ModelFile {
 }
 
 fn default_true() -> bool { true }
+fn default_512() -> u32 { 512 }
+fn default_20() -> u32 { 20 }
+fn default_cfg_7() -> f32 { 7.0 }
+fn default_sampler() -> String { "euler_a".to_string() }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelLicense {
@@ -157,9 +174,9 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
             architecture: m.architecture.clone(),
             size_bytes: m.size_bytes,
             vram_mb: m.vram_mb,
-            license_name: m.license.name.clone(),
-            license_url: m.license.url.clone(),
-            commercial: m.license.commercial,
+            license_name: m.license.as_ref().map(|l| l.name.clone()).unwrap_or_default(),
+            license_url: m.license.as_ref().map(|l| l.url.clone()).unwrap_or_default(),
+            commercial: m.license.as_ref().map(|l| l.commercial).unwrap_or(false),
             downloaded,
             active: is_active,
             default_width: m.default_width,
