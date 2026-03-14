@@ -132,6 +132,59 @@ pub async fn set_local_llm_model(state: State<'_, AppState>, model: Option<Strin
     Ok(())
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LocalLlmModel {
+    pub name: String,
+    pub size: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn list_local_llm_models(endpoint: String) -> Result<Vec<LocalLlmModel>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let base = endpoint.trim_end_matches('/');
+
+    // Try Ollama API first (/api/tags)
+    let ollama_url = format!("{}/api/tags", base);
+    if let Ok(resp) = client.get(&ollama_url).send().await {
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(models) = json.get("models").and_then(|m| m.as_array()) {
+                        return Ok(models.iter().filter_map(|m| {
+                            let name = m.get("name")?.as_str()?.to_string();
+                            let size = m.get("size").and_then(|s| s.as_u64());
+                            Some(LocalLlmModel { name, size })
+                        }).collect());
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: OpenAI-compatible /v1/models (LM Studio, etc.)
+    let openai_url = format!("{}/v1/models", base);
+    if let Ok(resp) = client.get(&openai_url).send().await {
+        if resp.status().is_success() {
+            if let Ok(text) = resp.text().await {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if let Some(models) = json.get("data").and_then(|d| d.as_array()) {
+                        return Ok(models.iter().filter_map(|m| {
+                            let name = m.get("id")?.as_str()?.to_string();
+                            Some(LocalLlmModel { name, size: None })
+                        }).collect());
+                    }
+                }
+            }
+        }
+    }
+
+    Err("Could not fetch models from endpoint. Is the server running?".into())
+}
+
 #[tauri::command]
 pub async fn get_enhance_provider(state: State<'_, AppState>) -> Result<String, String> {
     let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;

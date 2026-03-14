@@ -45,6 +45,7 @@ pub fn run() {
             commands::settings::set_local_llm_endpoint,
             commands::settings::get_local_llm_model,
             commands::settings::set_local_llm_model,
+            commands::settings::list_local_llm_models,
             commands::settings::get_enhance_provider,
             commands::settings::set_enhance_provider,
             commands::settings::get_perf_settings,

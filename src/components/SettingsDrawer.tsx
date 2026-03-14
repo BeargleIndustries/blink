@@ -1,5 +1,6 @@
-import { Component, Show, onMount, onCleanup } from "solid-js";
+import { Component, Show, onMount, onCleanup, createSignal, createEffect } from "solid-js";
 import type { PerfSettings, LoraConfig } from "../lib/types";
+import { listLocalLlmModels, type LocalLlmModel } from "../lib/tauri-api";
 import ToggleOption from "./ToggleOption";
 import LoraPicker from "./LoraPicker";
 
@@ -75,6 +76,39 @@ const rowStyle = {
 } as const;
 
 const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
+  const [availableModels, setAvailableModels] = createSignal<LocalLlmModel[]>([]);
+  const [modelsLoading, setModelsLoading] = createSignal(false);
+  const [modelsError, setModelsError] = createSignal<string | null>(null);
+
+  const fetchModels = async (endpoint: string | null) => {
+    if (!endpoint) {
+      setAvailableModels([]);
+      return;
+    }
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const models = await listLocalLlmModels(endpoint);
+      setAvailableModels(models);
+      // Auto-select first model if none selected
+      if (models.length > 0 && !props.localLlmModel) {
+        props.onLocalLlmModelChange(models[0].name);
+      }
+    } catch (e: any) {
+      setModelsError(e?.toString() ?? "Failed to fetch models");
+      setAvailableModels([]);
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  // Fetch models when endpoint changes or when local provider is selected
+  createEffect(() => {
+    if (props.enhanceProvider === "local" && props.localLlmEndpoint) {
+      fetchModels(props.localLlmEndpoint);
+    }
+  });
+
   onMount(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") props.onClose();
@@ -488,26 +522,68 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
                 "box-sizing": "border-box",
               }}
             />
-            <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px", "margin-top": "10px" }}>
-              Model Name
+            <div style={{ display: "flex", "align-items": "center", "justify-content": "space-between", "margin-top": "10px", "margin-bottom": "4px" }}>
+              <span style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600" }}>
+                Model
+              </span>
+              <button
+                onClick={() => fetchModels(props.localLlmEndpoint)}
+                disabled={modelsLoading() || !props.localLlmEndpoint}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: modelsLoading() || !props.localLlmEndpoint ? "default" : "pointer",
+                  "font-size": "12px",
+                  padding: "0 2px",
+                  opacity: modelsLoading() || !props.localLlmEndpoint ? "0.4" : "0.7",
+                }}
+                title="Refresh model list"
+              >
+                {modelsLoading() ? "..." : "↻ Refresh"}
+              </button>
             </div>
-            <input
-              type="text"
-              placeholder="mistral"
-              value={props.localLlmModel ?? ""}
-              onInput={(e) => props.onLocalLlmModelChange(e.currentTarget.value || null)}
-              style={{
-                width: "100%",
-                padding: "6px 10px",
-                background: "var(--bg-secondary)",
-                border: "1px solid var(--border)",
-                "border-radius": "4px",
-                color: "var(--text-primary)",
-                "font-size": "13px",
-                outline: "none",
-                "box-sizing": "border-box",
-              }}
-            />
+            <Show when={availableModels().length > 0} fallback={
+              <input
+                type="text"
+                placeholder={modelsLoading() ? "Loading..." : modelsError() ? "Server unreachable" : "mistral"}
+                value={props.localLlmModel ?? ""}
+                onInput={(e) => props.onLocalLlmModelChange(e.currentTarget.value || null)}
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  background: "var(--bg-secondary)",
+                  border: `1px solid ${modelsError() ? "var(--error, var(--border))" : "var(--border)"}`,
+                  "border-radius": "4px",
+                  color: "var(--text-primary)",
+                  "font-size": "13px",
+                  outline: "none",
+                  "box-sizing": "border-box",
+                }}
+              />
+            }>
+              <select
+                value={props.localLlmModel ?? ""}
+                onChange={(e) => props.onLocalLlmModelChange(e.currentTarget.value || null)}
+                style={{
+                  width: "100%",
+                  padding: "6px 10px",
+                  background: "var(--bg-secondary)",
+                  border: "1px solid var(--border)",
+                  "border-radius": "4px",
+                  color: "var(--text-primary)",
+                  "font-size": "13px",
+                  outline: "none",
+                  "box-sizing": "border-box",
+                }}
+              >
+                {availableModels().map((m) => (
+                  <option value={m.name}>
+                    {m.name}{m.size ? ` (${(m.size / 1e9).toFixed(1)}GB)` : ""}
+                  </option>
+                ))}
+              </select>
+            </Show>
             <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
               Works with Ollama, LM Studio, or any OpenAI-compatible server
             </div>

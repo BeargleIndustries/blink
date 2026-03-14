@@ -183,6 +183,15 @@ export async function setLocalLlmModel(model: string | null): Promise<void> {
   return invoke("set_local_llm_model", { model });
 }
 
+export interface LocalLlmModel {
+  name: string;
+  size: number | null;
+}
+
+export async function listLocalLlmModels(endpoint: string): Promise<LocalLlmModel[]> {
+  return invoke("list_local_llm_models", { endpoint });
+}
+
 export async function getEnhanceProvider(): Promise<string> {
   return invoke("get_enhance_provider");
 }
