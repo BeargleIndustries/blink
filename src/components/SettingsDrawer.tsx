@@ -30,6 +30,10 @@ interface SettingsDrawerProps {
   hfToken: string | null; onHfTokenChange: (v: string | null) => void;
   // Anthropic API Key
   anthropicKey: string | null; onAnthropicKeyChange: (v: string | null) => void;
+  // Local LLM
+  enhanceProvider: string; onEnhanceProviderChange: (v: string) => void;
+  localLlmEndpoint: string | null; onLocalLlmEndpointChange: (v: string | null) => void;
+  localLlmModel: string | null; onLocalLlmModelChange: (v: string | null) => void;
 }
 
 const inputStyle = {
@@ -399,6 +403,117 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
           </div>
         </div>
 
+        {/* Prompt Enhancement */}
+        <div style={sectionStyle}>
+          <div style={sectionHeadStyle}>Prompt Enhancement</div>
+          <div style={{ display: "flex", gap: "8px", "margin-bottom": "12px" }}>
+            <button
+              onClick={() => props.onEnhanceProviderChange("claude")}
+              style={{
+                flex: "1",
+                padding: "5px 8px",
+                background: props.enhanceProvider === "claude" ? "var(--accent)" : "var(--bg-secondary)",
+                border: `1px solid ${props.enhanceProvider === "claude" ? "var(--accent)" : "var(--border)"}`,
+                "border-radius": "4px",
+                color: props.enhanceProvider === "claude" ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                "font-size": "12px",
+                transition: "all 0.15s",
+              }}
+            >
+              Claude API
+            </button>
+            <button
+              onClick={() => props.onEnhanceProviderChange("local")}
+              style={{
+                flex: "1",
+                padding: "5px 8px",
+                background: props.enhanceProvider === "local" ? "var(--accent)" : "var(--bg-secondary)",
+                border: `1px solid ${props.enhanceProvider === "local" ? "var(--accent)" : "var(--border)"}`,
+                "border-radius": "4px",
+                color: props.enhanceProvider === "local" ? "#fff" : "var(--text-secondary)",
+                cursor: "pointer",
+                "font-size": "12px",
+                transition: "all 0.15s",
+              }}
+            >
+              Local LLM
+            </button>
+          </div>
+
+          <Show when={props.enhanceProvider === "claude"}>
+            <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px" }}>
+              Anthropic API Key
+            </div>
+            <input
+              type="password"
+              placeholder="sk-ant-..."
+              value={props.anthropicKey ?? ""}
+              onInput={(e) => props.onAnthropicKeyChange(e.currentTarget.value || null)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border)",
+                "border-radius": "4px",
+                color: "var(--text-primary)",
+                "font-size": "13px",
+                outline: "none",
+                "box-sizing": "border-box",
+              }}
+            />
+            <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
+              console.anthropic.com/settings/keys
+            </div>
+          </Show>
+
+          <Show when={props.enhanceProvider === "local"}>
+            <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px" }}>
+              Endpoint URL
+            </div>
+            <input
+              type="text"
+              placeholder="http://localhost:11434"
+              value={props.localLlmEndpoint ?? ""}
+              onInput={(e) => props.onLocalLlmEndpointChange(e.currentTarget.value || null)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border)",
+                "border-radius": "4px",
+                color: "var(--text-primary)",
+                "font-size": "13px",
+                outline: "none",
+                "box-sizing": "border-box",
+              }}
+            />
+            <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px", "margin-top": "10px" }}>
+              Model Name
+            </div>
+            <input
+              type="text"
+              placeholder="mistral"
+              value={props.localLlmModel ?? ""}
+              onInput={(e) => props.onLocalLlmModelChange(e.currentTarget.value || null)}
+              style={{
+                width: "100%",
+                padding: "6px 10px",
+                background: "var(--bg-secondary)",
+                border: "1px solid var(--border)",
+                "border-radius": "4px",
+                color: "var(--text-primary)",
+                "font-size": "13px",
+                outline: "none",
+                "box-sizing": "border-box",
+              }}
+            />
+            <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
+              Works with Ollama, LM Studio, or any OpenAI-compatible server
+            </div>
+          </Show>
+        </div>
+
         {/* Account */}
         <div style={{ ...sectionStyle, "border-bottom": "none" }}>
           <div style={sectionHeadStyle}>Account</div>
@@ -427,33 +542,6 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
           />
           <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
             huggingface.co/settings/tokens
-          </div>
-
-          <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px", "margin-top": "16px" }}>
-            Anthropic API Key
-          </div>
-          <div style={{ "font-size": "11px", color: "var(--text-secondary)", "margin-bottom": "8px", opacity: "0.6" }}>
-            Required for prompt enhancement (✨)
-          </div>
-          <input
-            type="password"
-            placeholder="sk-ant-..."
-            value={props.anthropicKey ?? ""}
-            onInput={(e) => props.onAnthropicKeyChange(e.currentTarget.value || null)}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              background: "var(--bg-secondary)",
-              border: "1px solid var(--border)",
-              "border-radius": "4px",
-              color: "var(--text-primary)",
-              "font-size": "13px",
-              outline: "none",
-              "box-sizing": "border-box",
-            }}
-          />
-          <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
-            console.anthropic.com/settings/keys
           </div>
         </div>
 

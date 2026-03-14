@@ -97,3 +97,54 @@ pub async fn set_anthropic_key(state: State<'_, AppState>, key: Option<String>) 
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn get_local_llm_endpoint(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    match store.get("local_llm_endpoint") {
+        Some(val) => serde_json::from_value(val).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn set_local_llm_endpoint(state: State<'_, AppState>, endpoint: Option<String>) -> Result<(), String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("local_llm_endpoint", serde_json::to_value(&endpoint).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_local_llm_model(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    match store.get("local_llm_model") {
+        Some(val) => serde_json::from_value(val).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn set_local_llm_model(state: State<'_, AppState>, model: Option<String>) -> Result<(), String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("local_llm_model", serde_json::to_value(&model).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_enhance_provider(state: State<'_, AppState>) -> Result<String, String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    match store.get("enhance_provider") {
+        Some(val) => serde_json::from_value(val).map_err(|e| e.to_string()),
+        None => Ok("claude".to_string()),
+    }
+}
+
+#[tauri::command]
+pub async fn set_enhance_provider(state: State<'_, AppState>, provider: String) -> Result<(), String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("enhance_provider", serde_json::to_value(&provider).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}

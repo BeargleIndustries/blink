@@ -19,6 +19,13 @@ import {
   getAnthropicKey,
   setAnthropicKey,
   enhancePrompt,
+  enhancePromptLocal,
+  getLocalLlmEndpoint,
+  setLocalLlmEndpoint,
+  getLocalLlmModel,
+  setLocalLlmModel,
+  getEnhanceProvider,
+  setEnhanceProvider,
 } from "./lib/tauri-api";
 import { getDefaultsForModel } from "./lib/defaults";
 
@@ -59,6 +66,9 @@ const App: Component = () => {
   const [downloadProgress, setDownloadProgress] = createSignal<{ modelId: string; fileRole: string; fileIndex: number; totalFiles: number } | null>(null);
   const [hfToken, setHfTokenState] = createSignal<string | null>(null);
   const [anthropicKey, setAnthropicKeyState] = createSignal<string | null>(null);
+  const [enhanceProvider, setEnhanceProviderState] = createSignal<string>("claude");
+  const [localLlmEndpoint, setLocalLlmEndpointState] = createSignal<string | null>(null);
+  const [localLlmModel, setLocalLlmModelState] = createSignal<string | null>(null);
   const [enhancing, setEnhancing] = createSignal(false);
   const [enhancedPrompt, setEnhancedPrompt] = createSignal<string | null>(null);
   const [enhancedNegativePrompt, setEnhancedNegativePrompt] = createSignal<string | null>(null);
@@ -134,13 +144,16 @@ const App: Component = () => {
 
   onMount(async () => {
     try {
-      const [loadedModels, sysInfo, gallery, perf, token, anthropicKeyVal] = await Promise.all([
+      const [loadedModels, sysInfo, gallery, perf, token, anthropicKeyVal, providerVal, endpointVal, modelVal] = await Promise.all([
         getModels(),
         getSystemInfo(),
         getGallery(),
         getPerfSettings(),
         getHfToken(),
         getAnthropicKey(),
+        getEnhanceProvider(),
+        getLocalLlmEndpoint(),
+        getLocalLlmModel(),
       ]);
 
       setModels(loadedModels);
@@ -149,6 +162,9 @@ const App: Component = () => {
       setPerfSettings(perf);
       setHfTokenState(token);
       setAnthropicKeyState(anthropicKeyVal);
+      setEnhanceProviderState(providerVal);
+      setLocalLlmEndpointState(endpointVal);
+      setLocalLlmModelState(modelVal);
 
       const active = loadedModels.find((m) => m.active);
       if (active) {
@@ -414,16 +430,30 @@ const App: Component = () => {
   };
 
   const handleEnhance = async (prompt: string) => {
-    const key = anthropicKey();
-    if (!key) {
-      setErrorMessage("Set your Anthropic API key in Settings to use prompt enhancement");
-      setTimeout(() => setErrorMessage(null), 5000);
-      return;
-    }
     if (!prompt.trim()) return;
     setEnhancing(true);
     try {
-      const result = await enhancePrompt(prompt, key);
+      let result: { prompt: string; negative_prompt: string };
+      if (enhanceProvider() === "local") {
+        const endpoint = localLlmEndpoint();
+        const model = localLlmModel();
+        if (!endpoint || !model) {
+          setErrorMessage("Configure local LLM endpoint and model in Settings");
+          setTimeout(() => setErrorMessage(null), 5000);
+          setEnhancing(false);
+          return;
+        }
+        result = await enhancePromptLocal(prompt, endpoint, model);
+      } else {
+        const key = anthropicKey();
+        if (!key) {
+          setErrorMessage("Set your Anthropic API key in Settings to use prompt enhancement");
+          setTimeout(() => setErrorMessage(null), 5000);
+          setEnhancing(false);
+          return;
+        }
+        result = await enhancePrompt(prompt, key);
+      }
       setEnhancedPrompt(result.prompt);
       setEnhancedNegativePrompt(result.negative_prompt || null);
       setTimeout(() => { setEnhancedPrompt(null); setEnhancedNegativePrompt(null); }, 100);
@@ -432,6 +462,33 @@ const App: Component = () => {
       setTimeout(() => setErrorMessage(null), 5000);
     } finally {
       setEnhancing(false);
+    }
+  };
+
+  const handleEnhanceProviderChange = async (provider: string) => {
+    setEnhanceProviderState(provider);
+    try {
+      await setEnhanceProvider(provider);
+    } catch (err) {
+      console.error("Failed to save enhance provider:", err);
+    }
+  };
+
+  const handleLocalLlmEndpointChange = async (endpoint: string | null) => {
+    setLocalLlmEndpointState(endpoint);
+    try {
+      await setLocalLlmEndpoint(endpoint);
+    } catch (err) {
+      console.error("Failed to save local LLM endpoint:", err);
+    }
+  };
+
+  const handleLocalLlmModelChange = async (model: string | null) => {
+    setLocalLlmModelState(model);
+    try {
+      await setLocalLlmModel(model);
+    } catch (err) {
+      console.error("Failed to save local LLM model:", err);
     }
   };
 
@@ -686,6 +743,9 @@ const App: Component = () => {
         perfSettings={perfSettings()} onPerfChange={handlePerfChange}
         hfToken={hfToken()} onHfTokenChange={handleHfTokenChange}
         anthropicKey={anthropicKey()} onAnthropicKeyChange={handleAnthropicKeyChange}
+        enhanceProvider={enhanceProvider()} onEnhanceProviderChange={handleEnhanceProviderChange}
+        localLlmEndpoint={localLlmEndpoint()} onLocalLlmEndpointChange={handleLocalLlmEndpointChange}
+        localLlmModel={localLlmModel()} onLocalLlmModelChange={handleLocalLlmModelChange}
       />
 
       <Show when={showWizard()}>

@@ -234,27 +234,7 @@ pub async fn cancel_generation(
     Ok(())
 }
 
-#[derive(serde::Deserialize)]
-struct AnthropicResponse {
-    content: Vec<AnthropicContentBlock>,
-}
-
-#[derive(serde::Deserialize)]
-struct AnthropicContentBlock {
-    text: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct EnhancedPrompt {
-    pub prompt: String,
-    pub negative_prompt: String,
-}
-
-#[tauri::command]
-pub async fn enhance_prompt(prompt: String, api_key: String) -> Result<EnhancedPrompt, String> {
-    let client = reqwest::Client::new();
-
-    let system_prompt = r#"You are an expert AI image generation prompt engineer. Enhance the user's simple prompt into a detailed, professional image generation prompt, and generate an appropriate negative prompt.
+const ENHANCE_SYSTEM_PROMPT: &str = r#"You are an expert AI image generation prompt engineer. Enhance the user's simple prompt into a detailed, professional image generation prompt, and generate an appropriate negative prompt.
 
 Positive prompt rules:
 - Keep the core subject/intent of the original prompt
@@ -276,6 +256,42 @@ PROMPT: [enhanced prompt]
 NEGATIVE: [negative prompt]
 
 Output ONLY these two lines. No explanation, no quotes, no other text."#;
+
+fn parse_enhance_response(text: String) -> EnhancedPrompt {
+    let mut enhanced_prompt = text.clone();
+    let mut negative_prompt = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(p) = line.strip_prefix("PROMPT:") {
+            enhanced_prompt = p.trim().to_string();
+        } else if let Some(n) = line.strip_prefix("NEGATIVE:") {
+            negative_prompt = n.trim().to_string();
+        }
+    }
+    EnhancedPrompt { prompt: enhanced_prompt, negative_prompt }
+}
+
+#[derive(serde::Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContentBlock>,
+}
+
+#[derive(serde::Deserialize)]
+struct AnthropicContentBlock {
+    text: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct EnhancedPrompt {
+    pub prompt: String,
+    pub negative_prompt: String,
+}
+
+#[tauri::command]
+pub async fn enhance_prompt(prompt: String, api_key: String) -> Result<EnhancedPrompt, String> {
+    let client = reqwest::Client::new();
+
+    let system_prompt = ENHANCE_SYSTEM_PROMPT;
 
     let response = client
         .post("https://api.anthropic.com/v1/messages")
@@ -311,22 +327,84 @@ Output ONLY these two lines. No explanation, no quotes, no other text."#;
         .and_then(|block| block.text.clone())
         .ok_or_else(|| "No text in response".to_string())?;
 
-    let mut enhanced_prompt = text.clone();
-    let mut negative_prompt = String::new();
+    Ok(parse_enhance_response(text))
+}
 
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(p) = line.strip_prefix("PROMPT:") {
-            enhanced_prompt = p.trim().to_string();
-        } else if let Some(n) = line.strip_prefix("NEGATIVE:") {
-            negative_prompt = n.trim().to_string();
-        }
+async fn enhance_prompt_ollama_native(prompt: String, endpoint: String, model: String) -> Result<EnhancedPrompt, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/chat", endpoint.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": ENHANCE_SYSTEM_PROMPT},
+                {"role": "user", "content": format!("Enhance this image generation prompt:\n\n{}", prompt)}
+            ],
+            "stream": false
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Ollama request failed: {}. Is Ollama running?", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("Ollama error {}: {}", status, body));
     }
 
-    Ok(EnhancedPrompt {
-        prompt: enhanced_prompt,
-        negative_prompt,
-    })
+    let result: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
+
+    let text = result["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "No content in Ollama response".to_string())?
+        .to_string();
+
+    Ok(parse_enhance_response(text))
+}
+
+#[tauri::command]
+pub async fn enhance_prompt_local(prompt: String, endpoint: String, model: String) -> Result<EnhancedPrompt, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/v1/chat/completions", endpoint.trim_end_matches('/'));
+
+    let response = client
+        .post(&url)
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": ENHANCE_SYSTEM_PROMPT},
+                {"role": "user", "content": format!("Enhance this image generation prompt:\n\n{}", prompt)}
+            ],
+            "max_tokens": 400,
+            "temperature": 0.7
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Local LLM request failed: {}. Is Ollama/LM Studio running?", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        // If 404, try Ollama native format
+        if status.as_u16() == 404 {
+            return enhance_prompt_ollama_native(prompt, endpoint, model).await;
+        }
+        return Err(format!("Local LLM error {}: {}", status, body));
+    }
+
+    let result: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let text = result["choices"][0]["message"]["content"]
+        .as_str()
+        .ok_or_else(|| "No content in response".to_string())?
+        .to_string();
+
+    Ok(parse_enhance_response(text))
 }
 
 fn encode_image_to_png(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {

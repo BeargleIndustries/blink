@@ -162,3 +162,31 @@ export async function getAnthropicKey(): Promise<string | null> {
 export async function setAnthropicKey(key: string | null): Promise<void> {
   return invoke("set_anthropic_key", { key });
 }
+
+export async function enhancePromptLocal(prompt: string, endpoint: string, model: string): Promise<{ prompt: string; negative_prompt: string }> {
+  return invoke("enhance_prompt_local", { prompt, endpoint, model });
+}
+
+export async function getLocalLlmEndpoint(): Promise<string | null> {
+  return invoke("get_local_llm_endpoint");
+}
+
+export async function setLocalLlmEndpoint(endpoint: string | null): Promise<void> {
+  return invoke("set_local_llm_endpoint", { endpoint });
+}
+
+export async function getLocalLlmModel(): Promise<string | null> {
+  return invoke("get_local_llm_model");
+}
+
+export async function setLocalLlmModel(model: string | null): Promise<void> {
+  return invoke("set_local_llm_model", { model });
+}
+
+export async function getEnhanceProvider(): Promise<string> {
+  return invoke("get_enhance_provider");
+}
+
+export async function setEnhanceProvider(provider: string): Promise<void> {
+  return invoke("set_enhance_provider", { provider });
+}
