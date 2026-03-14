@@ -6,3 +6,4 @@ dist/
 models/
 .omc/
 crates/sd-sys/stable-diffusion.cpp/build/
+src-tauri/gen/

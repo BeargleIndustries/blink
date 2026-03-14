@@ -1,6 +1,6 @@
 {
   "productName": "Blink",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.beargle.blink",
   "build": {
     "beforeDevCommand": "npm run dev",
