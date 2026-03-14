@@ -2,6 +2,17 @@ import { Component, Show, createSignal, createEffect, onMount, onCleanup } from 
 import MaskCanvas, { MaskCanvasAPI } from "./MaskCanvas";
 import InpaintToolbar from "./InpaintToolbar";
 
+export interface ImageInfo {
+  prompt: string;
+  negative_prompt: string;
+  model_name: string;
+  steps: number;
+  cfg_scale: number;
+  seed: number;
+  sampler: string;
+  generation_time_secs: number;
+}
+
 interface ImageCanvasProps {
   imageData: string | null;
   generating: boolean;
@@ -9,6 +20,7 @@ interface ImageCanvasProps {
   onClearImage: () => void;
   inputImage: string | null;
   previewImage?: string | null;
+  imageInfo?: ImageInfo | null;
   ref?: (api: ImageCanvasAPI) => void;
 }
 
@@ -22,6 +34,7 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
   const [brushSize, setBrushSize] = createSignal(30);
   const [isEraser, setIsEraser] = createSignal(false);
   const [hasMask, setHasMask] = createSignal(false);
+  const [showInfo, setShowInfo] = createSignal(false);
 
   // Natural image dimensions — updated when input image loads
   const [imgNaturalWidth, setImgNaturalWidth] = createSignal(512);
@@ -60,6 +73,12 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
       maskApi?.clearMask();
       setHasMask(false);
     }
+  });
+
+  // Close info panel when image changes
+  createEffect(() => {
+    props.imageData;
+    setShowInfo(false);
   });
 
   // Expose API to parent
@@ -256,6 +275,88 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
           }}>
             <div style={{ "font-size": "24px" }}>Generating...</div>
           </div>
+        </Show>
+
+        <Show when={props.imageData && !props.inputImage && props.imageInfo}>
+          <button
+            onClick={() => setShowInfo(!showInfo())}
+            style={{
+              position: "absolute",
+              bottom: "0",
+              left: "50%",
+              transform: "translateX(-50%)",
+              background: "rgba(0,0,0,0.6)",
+              border: "none",
+              color: "rgba(255,255,255,0.8)",
+              padding: "3px 14px",
+              "border-radius": "8px 8px 0 0",
+              cursor: "pointer",
+              "font-size": "11px",
+              "letter-spacing": "0.03em",
+              "z-index": "7",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.8)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
+          >
+            {showInfo() ? "▼ hide" : "▲ info"}
+          </button>
+
+          <Show when={showInfo()}>
+            <div style={{
+              position: "absolute",
+              bottom: "0",
+              left: "0",
+              right: "0",
+              background: "rgba(0, 0, 0, 0.82)",
+              "backdrop-filter": "blur(4px)",
+              color: "white",
+              padding: "14px 16px 12px",
+              "font-size": "12px",
+              "z-index": "5",
+              "border-radius": "var(--radius) var(--radius) 0 0",
+              "max-height": "60%",
+              "overflow-y": "auto",
+              "box-shadow": "0 -8px 24px rgba(0,0,0,0.4)",
+            }}>
+              <div style={{
+                "margin-bottom": "8px",
+                "font-size": "13px",
+                "line-height": "1.4",
+                "word-break": "break-word",
+                color: "rgba(255,255,255,0.95)",
+              }}>
+                {props.imageInfo!.prompt}
+              </div>
+              <Show when={props.imageInfo!.negative_prompt}>
+                <div style={{
+                  color: "rgba(255,255,255,0.45)",
+                  "margin-bottom": "8px",
+                  "font-size": "11px",
+                  "line-height": "1.4",
+                  "word-break": "break-word",
+                }}>
+                  — {props.imageInfo!.negative_prompt}
+                </div>
+              </Show>
+              <div style={{
+                display: "flex",
+                "flex-wrap": "wrap",
+                gap: "6px 12px",
+                color: "rgba(255,255,255,0.5)",
+                "font-size": "11px",
+                "border-top": "1px solid rgba(255,255,255,0.08)",
+                "padding-top": "8px",
+              }}>
+                <span style={{ color: "rgba(255,255,255,0.7)" }}>{props.imageInfo!.model_name}</span>
+                <span>{props.imageInfo!.steps} steps</span>
+                <span>CFG {props.imageInfo!.cfg_scale}</span>
+                <span>seed {props.imageInfo!.seed}</span>
+                <span>{props.imageInfo!.sampler}</span>
+                <span>{props.imageInfo!.generation_time_secs.toFixed(1)}s</span>
+              </div>
+            </div>
+          </Show>
         </Show>
       </div>
 

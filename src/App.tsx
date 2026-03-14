@@ -1,4 +1,4 @@
-import { Component, createSignal, onMount, onCleanup, Show } from "solid-js";
+import { Component, createSignal, onMount, onCleanup, Show, createEffect } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
 import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, PerfSettings, FileDownloadProgress, LoraConfig } from "./lib/types";
 import {
@@ -86,6 +86,18 @@ const App: Component = () => {
   const [controlNetEnabled, setControlNetEnabled] = createSignal(false);
   const [controlStrength, setControlStrength] = createSignal(0.75);
 
+  // Image info panel state — populated from gallery select or generation complete
+  const [imageInfo, setImageInfo] = createSignal<{
+    prompt: string;
+    negative_prompt: string;
+    model_name: string;
+    steps: number;
+    cfg_scale: number;
+    seed: number;
+    sampler: string;
+    generation_time_secs: number;
+  } | null>(null);
+
   // Track last generation params for gallery save
   let lastPrompt = "";
   let lastNegativePrompt = "";
@@ -166,6 +178,18 @@ const App: Component = () => {
         imageCanvasApi?.clearMask();
 
         const model = activeModel();
+
+        setImageInfo({
+          prompt: lastPrompt,
+          negative_prompt: lastNegativePrompt,
+          model_name: model?.name ?? "Unknown",
+          steps: steps(),
+          cfg_scale: cfgScale(),
+          seed: event.payload.seed,
+          sampler: sampler(),
+          generation_time_secs: event.payload.generation_time_secs,
+        });
+
         try {
           const item = await saveToGallery({
             imageBase64: event.payload.image_base64,
@@ -242,6 +266,7 @@ const App: Component = () => {
     if (!activeModelId()) return;
     lastPrompt = prompt;
     lastNegativePrompt = negativePrompt;
+    setImageInfo(null);
     setGenerating(true);
     setGeneratedImage(null);
     setPreviewImage(null);
@@ -346,6 +371,16 @@ const App: Component = () => {
       const base64 = await loadGalleryImage(item.id);
       setInputImage(null);
       setGeneratedImage(base64);
+      setImageInfo({
+        prompt: item.prompt,
+        negative_prompt: item.negative_prompt,
+        model_name: item.model_name,
+        steps: item.steps,
+        cfg_scale: item.cfg_scale,
+        seed: item.seed,
+        sampler: item.sampler,
+        generation_time_secs: item.generation_time_secs,
+      });
     } catch (err) {
       console.error("Failed to load gallery image:", err);
     }
@@ -495,6 +530,7 @@ const App: Component = () => {
           onClearImage={handleClearImage}
           inputImage={inputImage()}
           previewImage={previewImage()}
+          imageInfo={imageInfo()}
           ref={(api) => { imageCanvasApi = api; }}
         />
 
