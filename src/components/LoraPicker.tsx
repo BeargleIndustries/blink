@@ -59,12 +59,7 @@ const LoraPicker: Component<LoraPickerProps> = (props) => {
 
   return (
     <Show when={props.visible}>
-      <div style={{
-        "grid-column": "1 / -1",
-        "border-top": "1px solid var(--border)",
-        "padding-top": "8px",
-        "margin-top": "4px",
-      }}>
+      <div>
         <div style={{
           display: "flex",
           "align-items": "center",

@@ -22,7 +22,7 @@ import { getDefaultsForModel } from "./lib/defaults";
 import PromptBar from "./components/PromptBar";
 import ImageCanvas, { ImageCanvasAPI } from "./components/ImageCanvas";
 import ProgressBar from "./components/ProgressBar";
-import SettingsPanel from "./components/SettingsPanel";
+import SettingsDrawer from "./components/SettingsDrawer";
 import ModelSelector from "./components/ModelSelector";
 import ModelBrowser from "./components/ModelBrowser";
 import Gallery from "./components/Gallery";
@@ -34,6 +34,7 @@ const App: Component = () => {
   const [showBrowser, setShowBrowser] = createSignal(false);
   const [showAbout, setShowAbout] = createSignal(false);
   const [showWizard, setShowWizard] = createSignal(false);
+  const [showSettings, setShowSettings] = createSignal(false);
 
   // Data state
   const [models, setModels] = createSignal<ModelInfo[]>([]);
@@ -447,6 +448,21 @@ const App: Component = () => {
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
           <button
+            onClick={() => setShowSettings(!showSettings())}
+            title="Settings"
+            style={{
+              padding: "4px 8px",
+              background: showSettings() ? "var(--bg-tertiary)" : "none",
+              border: showSettings() ? "1px solid var(--border)" : "none",
+              "border-radius": "var(--radius)",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              "font-size": "16px",
+            }}
+          >
+            ⚙
+          </button>
+          <button
             onClick={() => setShowAbout(true)}
             style={{
               padding: "4px 8px",
@@ -470,7 +486,7 @@ const App: Component = () => {
         "justify-content": "safe center",
         padding: "16px 24px",
         gap: "12px",
-        overflow: "auto",
+        overflow: "hidden",
       }}>
         <ImageCanvas
           imageData={generatedImage()}
@@ -522,35 +538,6 @@ const App: Component = () => {
           </div>
         </Show>
 
-        <Show when={inputImage() && editMode()}>
-          <div style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "8px",
-            width: "100%",
-            "max-width": "700px",
-            padding: "8px 12px",
-            background: "var(--bg-secondary)",
-            "border-radius": "var(--radius)",
-          }}>
-            <span style={{ "font-size": "12px", color: "var(--text-secondary)", "min-width": "110px" }}>
-              Image Conditioning
-            </span>
-            <input
-              type="range"
-              min="0.5"
-              max="3.0"
-              step="0.05"
-              value={imgCfg()}
-              onInput={(e) => setImgCfg(parseFloat(e.currentTarget.value))}
-              style={{ flex: "1" }}
-            />
-            <span style={{ "font-size": "13px", "min-width": "35px" }}>
-              {imgCfg().toFixed(2)}
-            </span>
-          </div>
-        </Show>
-
         <ProgressBar
           step={currentStep()}
           totalSteps={totalSteps()}
@@ -582,34 +569,6 @@ const App: Component = () => {
           mode={(mode() === "edit" ? "img2img" : mode()) as "txt2img" | "img2img"}
         />
 
-        <SettingsPanel
-          steps={steps()}
-          cfgScale={cfgScale()}
-          seed={seed()}
-          width={width()}
-          height={height()}
-          sampler={sampler()}
-          onStepsChange={setSteps}
-          onCfgChange={setCfgScale}
-          onSeedChange={setSeed}
-          onWidthChange={setWidth}
-          onHeightChange={setHeight}
-          onSamplerChange={setSampler}
-          strength={strength()}
-          onStrengthChange={setStrength}
-          showStrength={mode() === "img2img"}
-          perfSettings={perfSettings()}
-          onPerfChange={handlePerfChange}
-          hfToken={hfToken()}
-          onHfTokenChange={handleHfTokenChange}
-          controlNetEnabled={controlNetEnabled()}
-          onControlNetChange={setControlNetEnabled}
-          controlStrength={controlStrength()}
-          onControlStrengthChange={setControlStrength}
-          showControlNet={mode() === "img2img"}
-          loras={loras()}
-          onLorasChange={setLoras}
-        />
       </main>
 
       <footer style={{
@@ -627,6 +586,26 @@ const App: Component = () => {
           }}
         />
       </footer>
+
+      <SettingsDrawer
+        open={showSettings()}
+        onClose={() => setShowSettings(false)}
+        steps={steps()} onStepsChange={setSteps}
+        cfgScale={cfgScale()} onCfgChange={setCfgScale}
+        seed={seed()} onSeedChange={setSeed}
+        width={width()} onWidthChange={setWidth}
+        height={height()} onHeightChange={setHeight}
+        sampler={sampler()} onSamplerChange={setSampler}
+        strength={strength()} onStrengthChange={setStrength}
+        showStrength={mode() === "img2img"}
+        imgCfg={imgCfg()} onImgCfgChange={setImgCfg}
+        showImgCfg={editMode() && !!inputImage()}
+        controlNetEnabled={controlNetEnabled()} onControlNetChange={setControlNetEnabled}
+        controlStrength={controlStrength()} onControlStrengthChange={setControlStrength}
+        loras={loras()} onLorasChange={setLoras}
+        perfSettings={perfSettings()} onPerfChange={handlePerfChange}
+        hfToken={hfToken()} onHfTokenChange={handleHfTokenChange}
+      />
 
       <Show when={showWizard()}>
         <FirstRunWizard

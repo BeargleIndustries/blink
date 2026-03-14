@@ -2,20 +2,32 @@
 
 Dead-simple local AI image generation. Type a prompt, get an image. No Python. No node graphs. No PhD required.
 
-![Screenshot placeholder](docs/screenshot.png)
+![Blink screenshot](docs/screenshot.png)
 
 ## Features
 
-- GPU-accelerated inference (CUDA, Metal, Vulkan)
-- Multiple model architectures (SD 1.5, SDXL, Flux, Z-Image Turbo)
+- **Dead-simple by default** — just type a prompt and hit Generate
+- GPU-accelerated inference (CUDA, Metal, Vulkan, OpenCL, CPU fallback)
+- Multiple model architectures (SD 1.5, SDXL, Flux, Z-Image Turbo, Kontext)
 - Built-in model browser with one-click downloads from HuggingFace
 - Custom model import from any HuggingFace URL
-- Image-to-image generation
+- **Image editing (Kontext)** — load an image, describe changes, get edited result
+- **Inpainting** — paint a mask over areas to regenerate with brush/eraser tools
+- **Image-to-image** — transform images with prompt guidance
+- **LoRA support** — load and stack LoRA adapters per-generation
+- **ESRGAN upscaling** — one-button 2x/4x image upscaling
+- **Live previews** — see intermediate results during generation (TAESD)
+- **Video generation** — text-to-video and image-to-video with Wan models
+- **ControlNet** — preserve structure during generation (SD 1.5, canny edge detection)
 - Generation gallery with auto-save
-- Performance settings (flash attention, memory-mapped loading, VRAM management)
+- Slide-out settings panel — advanced controls without cluttering the canvas
+- Smart model defaults — auto-applies optimal settings on model switch
+- Performance tuning (flash attention, memory-mapped loading, VRAM management)
 - Dark, minimal UI
 
 ## Supported Models
+
+### Generation Models
 
 | Model | Architecture | Size | VRAM | Default Steps | License |
 |-------|-------------|------|------|---------------|---------|
@@ -28,7 +40,23 @@ Dead-simple local AI image generation. Type a prompt, get an image. No Python. N
 | Z-Image Turbo | Z-Image (Lumina2) | 5.5 GB | 4 GB | 4 | Apache 2.0 |
 | Z-Image Turbo (Q8) | Z-Image (Lumina2) | 9.2 GB | 8 GB | 4 | Apache 2.0 |
 
-> Flux and Z-Image Turbo are multi-file models (diffusion model + text encoder + VAE). Blink downloads and manages all components automatically.
+### Image Editing Models
+
+| Model | Architecture | Size | VRAM | Default Steps | License |
+|-------|-------------|------|------|---------------|---------|
+| FLUX.1 Kontext Dev (Q4) | Flux Kontext | 9.4 GB | 12 GB | 35 | Non-Commercial |
+| FLUX.1 Kontext Dev (Q8) | Flux Kontext | 15 GB | 16 GB | 35 | Non-Commercial |
+
+### Utility Models
+
+| Model | Type | Size | Purpose |
+|-------|------|------|---------|
+| RealESRGAN x4 Plus | Upscaler | 67 MB | 4x image upscaling |
+| RealESRGAN x4 Anime | Upscaler | 67 MB | 4x upscaling (anime) |
+| ControlNet Canny (SD 1.5) | ControlNet | 700 MB | Structure preservation |
+| TAESD (SD/SDXL/Flux) | Preview | ~5 MB | Live generation previews |
+
+> Multi-file models (Flux, Kontext, Z-Image) include diffusion model + text encoder + VAE. Blink downloads and manages all components automatically.
 
 ## System Requirements
 
@@ -90,15 +118,22 @@ npx tauri build --features vulkan
 
 ## Configuration
 
+### Settings Panel
+
+Click the gear icon (⚙) in the header to access all advanced settings:
+
+- **Generation** — Steps, CFG scale, seed, image size, sampler
+- **img2img** — Denoising strength for image-to-image and inpainting
+- **LoRA** — Add/remove LoRA adapters with per-LoRA strength control
+- **ControlNet** — Structure preservation with canny edge detection (SD 1.5)
+- **Performance** — Flash attention, memory mapping, VRAM offloading
+- **Account** — HuggingFace token for gated model access
+
+Settings auto-apply model-specific defaults whenever you switch models.
+
 ### HuggingFace Token
 
-Some models require a HuggingFace account. Set your token in **Advanced Settings** to enable downloads for gated models.
-
-### Performance Settings
-
-- **Flash Attention** — Faster inference, lower memory usage. Enabled by default.
-- **Memory-Mapped Loading** — Faster model load times. Enabled by default.
-- **Offload to CPU** — For models that exceed available VRAM. Recommended for Flux and Z-Image Turbo on lower-end GPUs.
+Some models require a HuggingFace account. Set your token in **Settings > Account** to enable downloads for gated models.
 
 ## Tech Stack
 
