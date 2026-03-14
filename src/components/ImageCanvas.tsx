@@ -112,9 +112,40 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
             &#127912;
           </div>
           <div>Generated image will appear here</div>
-          <div style={{ "font-size": "12px", "margin-top": "8px" }}>
-            Drop an image here for img2img
+          <div style={{ "font-size": "12px", "margin-top": "8px", color: "var(--text-muted)" }}>
+            Drop an image here for img2img, or
           </div>
+          <button
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = "image/*";
+              input.onchange = () => {
+                const file = input.files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = () => {
+                    props.onImageDrop(reader.result as string);
+                  };
+                  reader.readAsDataURL(file);
+                }
+              };
+              input.click();
+            }}
+            style={{
+              "margin-top": "8px",
+              padding: "6px 16px",
+              background: "var(--bg-tertiary)",
+              border: "1px solid var(--border)",
+              "border-radius": "var(--radius)",
+              color: "var(--text-secondary)",
+              cursor: "pointer",
+              "font-size": "12px",
+              transition: "var(--transition)",
+            }}
+          >
+            Browse for image
+          </button>
         </div>
       </Show>
 

@@ -113,7 +113,7 @@ impl SdCppContext {
                 params.llm_path = llm.as_ptr();
             }
             params.n_threads = config.n_threads;
-            params.vae_decode_only = true;
+            params.vae_decode_only = false; // need encoder for img2img
             // SD_TYPE_COUNT = auto-detect quantization from model file
             params.wtype = sd_sys::sd_type_t_SD_TYPE_COUNT;
 
@@ -197,12 +197,27 @@ impl SdCppContext {
             data: std::ptr::null_mut(),
         };
 
+        // For img2img, sd.cpp aligns width/height UP to a spatial_multiple (e.g. 64 for SD1.5).
+        // The init_image MUST match the ALIGNED dimensions, not the original.
+        // We resize the input image to the aligned size to avoid the assert failure.
+        let mut img2img_width = params.width;
+        let mut img2img_height = params.height;
+
         if let Some(img_bytes) = input_image {
             let img = image::load_from_memory(img_bytes).map_err(|e| SdError::InvalidParams {
                 reason: format!("Failed to decode input image: {}", e),
             })?;
-            let rgb_img = img.to_rgb8();
+            // Align dimensions up to multiple of 64 (covers all model architectures:
+            // SD1.5=64, SDXL=64, Flux=64, Z-Image=64)
+            let (orig_w, orig_h) = (img.width(), img.height());
+            let align = 64u32;
+            let aligned_w = ((orig_w + align - 1) / align) * align;
+            let aligned_h = ((orig_h + align - 1) / align) * align;
+
+            let resized = img.resize_exact(aligned_w, aligned_h, image::imageops::FilterType::Lanczos3);
+            let rgb_img = resized.to_rgb8();
             let (w, h) = rgb_img.dimensions();
+            eprintln!("[blink] img2img input: {}x{} -> aligned {}x{}", orig_w, orig_h, w, h);
             decoded_rgb = rgb_img.into_raw();
             init_image = sd_sys::sd_image_t {
                 width: w,
@@ -210,6 +225,8 @@ impl SdCppContext {
                 channel: 3,
                 data: decoded_rgb.as_mut_ptr(),
             };
+            img2img_width = w;
+            img2img_height = h;
         }
 
         // Set up progress trampoline — heap-allocated so it outlives any early return
@@ -232,8 +249,8 @@ impl SdCppContext {
 
             gen_params.prompt = prompt_c.as_ptr();
             gen_params.negative_prompt = neg_prompt_c.as_ptr();
-            gen_params.width = params.width as i32;
-            gen_params.height = params.height as i32;
+            gen_params.width = img2img_width as i32;
+            gen_params.height = img2img_height as i32;
             gen_params.seed = params.seed;
             gen_params.batch_count = 1;
 
@@ -262,10 +279,24 @@ impl SdCppContext {
             eprintln!("[blink] sample_method={}, scheduler={}, steps={}, cfg={}",
                 user_method, sample_params.scheduler, params.steps, params.cfg_scale);
 
-            // img2img specifics
+            // img2img: build mask before the generate call so it stays alive
+            let mut mask_data: Vec<u8> = if input_image.is_some() {
+                vec![255u8; (img2img_width * img2img_height) as usize]
+            } else {
+                Vec::new()
+            };
+
             if input_image.is_some() {
                 gen_params.init_image = init_image;
                 gen_params.strength = strength;
+                // mask_image must have matching dimensions — sd.cpp asserts width/height/channel
+                // before reading data. All-255 mask = "modify everything" (no inpainting).
+                gen_params.mask_image = sd_sys::sd_image_t {
+                    width: img2img_width,
+                    height: img2img_height,
+                    channel: 1,
+                    data: mask_data.as_mut_ptr(),
+                };
             } else {
                 gen_params.strength = 0.0;
             }

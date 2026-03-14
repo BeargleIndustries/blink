@@ -308,6 +308,7 @@ const App: Component = () => {
   const handleGallerySelect = async (item: GalleryItem) => {
     try {
       const base64 = await loadGalleryImage(item.id);
+      setInputImage(null); // clear img2img input so gallery image displays
       setGeneratedImage(base64);
     } catch (err) {
       console.error("Failed to load gallery image:", err);
