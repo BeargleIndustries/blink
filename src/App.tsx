@@ -467,7 +467,7 @@ const App: Component = () => {
         display: "flex",
         "flex-direction": "column",
         "align-items": "center",
-        "justify-content": "center",
+        "justify-content": "safe center",
         padding: "16px 24px",
         gap: "12px",
         overflow: "auto",

@@ -115,11 +115,9 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
         style={{
-          width: "512px",
+          width: "min(512px, calc(100vh - 350px))",
+          height: "min(512px, calc(100vh - 350px))",
           "max-width": "100%",
-          "max-height": "calc(100vh - 280px)",
-          "min-height": "256px",
-          "aspect-ratio": "1",
           background: "var(--bg-secondary)",
           "border-radius": "var(--radius)",
           border: `2px ${dragOver() ? "solid var(--accent)" : "dashed var(--border)"}`,
