@@ -2,13 +2,13 @@
   "schema_version": 1,
   "models": [
     {
-      "id": "sd15-q8",
+      "id": "sd15-q5",
       "name": "Stable Diffusion 1.5",
       "description": "The classic. Fast, low VRAM, huge ecosystem of compatible LoRAs and tools.",
       "repo": "second-state/stable-diffusion-v1-5-GGUF",
-      "filename": "stable-diffusion-v1-5-Q8_0.gguf",
+      "filename": "stable-diffusion-v1-5-pruned-emaonly-Q5_0.gguf",
       "sha256": "pending-verification",
-      "size_bytes": 1890000000,
+      "size_bytes": 1620000000,
       "vram_mb": 1600,
       "architecture": "sd1",
       "default_width": 512,
@@ -25,13 +25,13 @@
       "recommended_for": ["low_vram", "beginners"]
     },
     {
-      "id": "sdxl-q5",
+      "id": "sdxl-q4",
       "name": "Stable Diffusion XL",
       "description": "Higher quality, needs more VRAM. 1024x1024 native resolution.",
-      "repo": "second-state/SDXL-Base-1.0-GGUF",
-      "filename": "sd_xl_base_1.0-Q5_K_M.gguf",
+      "repo": "gpustack/stable-diffusion-xl-base-1.0-GGUF",
+      "filename": "stable-diffusion-xl-base-1.0-Q4_0.gguf",
       "sha256": "pending-verification",
-      "size_bytes": 4200000000,
+      "size_bytes": 3600000000,
       "vram_mb": 5000,
       "architecture": "sdxl",
       "default_width": 1024,
@@ -50,11 +50,9 @@
     {
       "id": "flux-schnell-q4",
       "name": "Flux.1 Schnell",
-      "description": "Fast, high-quality. Only 4 steps needed. Requires additional CLIP/T5 weights (coming soon).",
-      "repo": "leejet/FLUX.1-schnell-GGUF",
-      "filename": "flux1-schnell-Q4_K_S.gguf",
+      "description": "Fast, high-quality. Only 4 steps needed. Multi-file model with CLIP, T5, and VAE weights.",
       "sha256": "pending-verification",
-      "size_bytes": 6800000000,
+      "size_bytes": 9880000000,
       "vram_mb": 10000,
       "architecture": "flux",
       "default_width": 1024,
@@ -68,8 +66,254 @@
         "commercial": true
       },
       "tier": 2,
-      "available": false,
+      "available": true,
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "leejet/FLUX.1-schnell-GGUF",
+          "filename": "flux1-schnell-q4_k.gguf",
+          "size_bytes": 6400000000,
+          "required": true
+        },
+        {
+          "role": "clip_l",
+          "repo": "comfyanonymous/flux_text_encoders",
+          "filename": "clip_l.safetensors",
+          "size_bytes": 300000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
       "recommended_for": ["speed", "quality"]
+    },
+    {
+      "id": "sd15-q8",
+      "name": "Stable Diffusion 1.5 (Q8)",
+      "description": "Higher quality SD 1.5 variant. Slower but better detail.",
+      "repo": "second-state/stable-diffusion-v1-5-GGUF",
+      "filename": "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
+      "sha256": "pending-verification",
+      "size_bytes": 2130000000,
+      "vram_mb": 2000,
+      "architecture": "sd1",
+      "default_width": 512,
+      "default_height": 512,
+      "default_steps": 20,
+      "default_cfg": 7.0,
+      "default_sampler": "euler_a",
+      "license": {
+        "name": "CreativeML Open RAIL-M",
+        "url": "https://huggingface.co/spaces/CompVis/stable-diffusion-license",
+        "commercial": true
+      },
+      "tier": 2,
+      "recommended_for": ["quality"]
+    },
+    {
+      "id": "flux-dev-q4",
+      "name": "Flux.1 Dev",
+      "description": "Higher quality Flux variant. More steps needed (20-50) but better results.",
+      "sha256": "pending-verification",
+      "size_bytes": 10080000000,
+      "vram_mb": 12000,
+      "architecture": "flux",
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "leejet/FLUX.1-dev-GGUF",
+          "filename": "flux1-dev-q4_k.gguf",
+          "size_bytes": 6400000000,
+          "required": true
+        },
+        {
+          "role": "clip_l",
+          "repo": "comfyanonymous/flux_text_encoders",
+          "filename": "clip_l.safetensors",
+          "size_bytes": 300000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 25,
+      "default_cfg": 3.5,
+      "default_sampler": "euler",
+      "license": {
+        "name": "FLUX.1 Dev Non-Commercial",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/blob/main/LICENSE.md",
+        "commercial": false
+      },
+      "tier": 2,
+      "recommended_for": ["quality"]
+    },
+    {
+      "id": "z-image-turbo",
+      "name": "Z-Image Turbo",
+      "description": "Fast turbo-style generation from Tongyi (Lumina2 architecture). Only 4 steps needed. Requires LLM text encoder.",
+      "sha256": "pending-verification",
+      "size_bytes": 5500000000,
+      "vram_mb": 4000,
+      "architecture": "z-image",
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "leejet/Z-Image-Turbo-GGUF",
+          "filename": "z_image_turbo-Q4_K.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+          "filename": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+          "size_bytes": 2800000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "default_width": 512,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "recommended_for": ["speed"]
+    },
+    {
+      "id": "z-image-turbo-q8",
+      "name": "Z-Image Turbo (Q8)",
+      "description": "Highest quality Z-Image quantization. ~6GB diffusion model. Best results from Z-Image Turbo.",
+      "sha256": "pending-verification",
+      "size_bytes": 9200000000,
+      "vram_mb": 8000,
+      "architecture": "z-image",
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "leejet/Z-Image-Turbo-GGUF",
+          "filename": "z_image_turbo-Q8_0.gguf",
+          "size_bytes": 6200000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+          "filename": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+          "size_bytes": 2800000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "default_width": 512,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Tongyi-MAI/Z-Image-Turbo",
+        "commercial": true
+      },
+      "tier": 2,
+      "available": true,
+      "recommended_for": ["quality"]
+    },
+    {
+      "id": "flux-schnell-q8",
+      "name": "Flux.1 Schnell (Q8)",
+      "available": false,
+      "description": "Highest quality Flux Schnell. ~13GB diffusion model. Requires 16GB+ VRAM.",
+      "sha256": "pending-verification",
+      "size_bytes": 16000000000,
+      "vram_mb": 16000,
+      "architecture": "flux",
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "leejet/FLUX.1-schnell-GGUF",
+          "filename": "flux1-schnell-q8_0.gguf",
+          "size_bytes": 12800000000,
+          "required": true
+        },
+        {
+          "role": "clip_l",
+          "repo": "comfyanonymous/flux_text_encoders",
+          "filename": "clip_l.safetensors",
+          "size_bytes": 300000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/blob/main/LICENSE",
+        "commercial": true
+      },
+      "tier": 2,
+      "recommended_for": ["quality"]
     }
   ]
 }

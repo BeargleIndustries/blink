@@ -1,8 +1,23 @@
 #[derive(Debug, Clone)]
 pub struct ContextConfig {
-    pub model_path: String,
+    pub model_path: Option<String>,
     pub vae_path: Option<String>,
+    // Flux-specific model paths
+    pub clip_l_path: Option<String>,
+    pub t5xxl_path: Option<String>,
+    pub diffusion_model_path: Option<String>,
+    // Z-Image / LLM-encoder models
+    pub llm_path: Option<String>,
     pub n_threads: i32,
+    // Performance options
+    pub flash_attn: bool,
+    pub diffusion_flash_attn: bool,
+    pub enable_mmap: bool,
+    pub free_params_immediately: bool,
+    // VRAM management — offload stages to CPU to save GPU memory
+    pub keep_clip_on_cpu: bool,
+    pub keep_vae_on_cpu: bool,
+    pub offload_params_to_cpu: bool,
 }
 
 #[derive(Debug, Clone)]

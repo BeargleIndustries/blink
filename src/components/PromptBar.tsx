@@ -4,6 +4,8 @@ interface PromptBarProps {
   onGenerate: (prompt: string, negativePrompt: string) => void;
   onCancel: () => void;
   generating: boolean;
+  modelLoading: boolean;
+  modelReady: boolean;
   mode: "txt2img" | "img2img";
 }
 
@@ -11,8 +13,10 @@ const PromptBar: Component<PromptBarProps> = (props) => {
   const [prompt, setPrompt] = createSignal("");
   const [negativePrompt, setNegativePrompt] = createSignal("");
 
+  const canGenerate = () => props.modelReady && !props.generating && !props.modelLoading && prompt().trim().length > 0;
+
   const handleGenerate = () => {
-    if (prompt().trim() && !props.generating) {
+    if (canGenerate()) {
       props.onGenerate(prompt(), negativePrompt());
     }
   };
@@ -73,21 +77,29 @@ const PromptBar: Component<PromptBarProps> = (props) => {
       />
       <button
         onClick={props.generating ? props.onCancel : handleGenerate}
-        disabled={!props.generating && !prompt().trim()}
+        disabled={!props.generating && !canGenerate()}
         style={{
           padding: "12px 24px",
-          background: props.generating ? "var(--error)" : "var(--accent)",
+          background: props.generating ? "var(--error)" : props.modelLoading ? "var(--bg-tertiary)" : "var(--accent)",
           border: "none",
           "border-radius": "var(--radius)",
           color: "white",
           "font-size": "16px",
           "font-weight": "bold",
-          cursor: !props.generating && !prompt().trim() ? "not-allowed" : "pointer",
-          opacity: !props.generating && !prompt().trim() ? "0.5" : "1",
-          transition: "background 0.2s",
+          cursor: !props.generating && !canGenerate() ? "not-allowed" : "pointer",
+          opacity: !props.generating && !canGenerate() ? "0.5" : "1",
+          transition: "var(--transition)",
         }}
       >
-        {props.generating ? "Cancel" : props.mode === "img2img" ? "Transform" : "Generate"}
+        {props.modelLoading
+          ? "Loading model..."
+          : !props.modelReady
+          ? "Select a model"
+          : props.generating
+          ? "Cancel"
+          : props.mode === "img2img"
+          ? "Transform"
+          : "Generate"}
       </button>
     </div>
   );

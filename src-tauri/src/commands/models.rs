@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
-use tauri::{State, Manager, Emitter};
-use crate::state::AppState;
+use tauri::{State, Emitter};
+use tauri_plugin_store::StoreExt;
+use crate::state::{AppState, ModelPaths, PerfSettings};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -14,8 +16,10 @@ pub struct ManifestModel {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub repo: String,
-    pub filename: String,
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub filename: Option<String>,
     pub sha256: String,
     pub size_bytes: u64,
     pub vram_mb: u64,
@@ -27,9 +31,20 @@ pub struct ManifestModel {
     pub default_sampler: String,
     pub license: ModelLicense,
     pub tier: u32,
+    #[serde(default)]
+    pub files: Option<Vec<ModelFile>>,
     #[serde(default = "default_true")]
     pub available: bool,
     pub recommended_for: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ModelFile {
+    pub role: String,
+    pub repo: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub required: bool,
 }
 
 fn default_true() -> bool { true }
@@ -82,6 +97,14 @@ struct ModelStatus {
     downloaded_at: Option<String>,
     size_bytes: u64,
     sha256_verified: bool,
+    #[serde(default)]
+    files: Option<HashMap<String, FileStatus>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct FileStatus {
+    pub status: String,
+    pub path: String,
 }
 
 fn load_manifest() -> Result<ModelManifest, String> {
@@ -121,7 +144,7 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
     let metadata = load_metadata(&model_dir);
     let active = state.active_model.lock().map_err(|e| e.to_string())?.clone();
 
-    let models = manifest.models.iter().filter(|m| m.available).map(|m| {
+    let mut models: Vec<ModelInfo> = manifest.models.iter().filter(|m| m.available).map(|m| {
         let downloaded = metadata.models.get(&m.id)
             .map(|s| s.status == "ready")
             .unwrap_or(false);
@@ -147,6 +170,36 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
         }
     }).collect();
 
+    // Append custom models (metadata entries whose ID starts with "custom-")
+    for (id, status) in &metadata.models {
+        if id.starts_with("custom-") && status.status == "ready" {
+            let full_path = PathBuf::from(&model_dir).join(&status.path);
+            let size_bytes = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(status.size_bytes);
+            let filename = full_path.file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| id.clone());
+            let is_active = active.as_ref() == Some(id);
+            models.push(ModelInfo {
+                id: id.clone(),
+                name: filename,
+                description: "Custom imported model".to_string(),
+                architecture: "custom".to_string(),
+                size_bytes,
+                vram_mb: 0,
+                license_name: "Unknown".to_string(),
+                license_url: String::new(),
+                commercial: false,
+                downloaded: true,
+                active: is_active,
+                default_width: 512,
+                default_height: 512,
+                default_steps: 20,
+                default_cfg: 7.0,
+                default_sampler: "euler_a".to_string(),
+            });
+        }
+    }
+
     Ok(models)
 }
 
@@ -170,9 +223,18 @@ pub async fn download_model(
     let model_dir = state.model_dir.lock().map_err(|e| e.to_string())?.clone();
     let app_handle = state.app_handle.clone();
 
-    std::thread::spawn(move || {
-        log::info!("Starting download: {} from {}/{}", model.name, model.repo, model.filename);
+    // Read HF token from store for gated model access
+    let hf_token: Option<String> = state.app_handle.store("settings.json")
+        .ok()
+        .and_then(|store| store.get("hf_token"))
+        .and_then(|val| serde_json::from_value(val).ok())
+        .flatten();
 
+    std::thread::spawn(move || {
+        // Catch panics so they don't silently kill the thread
+        let app_handle_panic = app_handle.clone();
+        let model_id_panic = model.id.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let target_dir = PathBuf::from(&model_dir).join(&model.architecture);
         if let Err(e) = std::fs::create_dir_all(&target_dir) {
             log::error!("Failed to create model dir: {}", e);
@@ -181,45 +243,229 @@ pub async fn download_model(
             return;
         }
 
-        let target_path = target_dir.join(&model.filename);
-
-        match hf_hub::api::sync::Api::new() {
-            Ok(api) => {
-                let repo = api.model(model.repo.clone());
-                match repo.get(&model.filename) {
-                    Ok(cached_path) => {
-                        if let Err(e) = std::fs::copy(&cached_path, &target_path) {
-                            log::error!("Failed to copy model to target dir: {}", e);
-                            let _ = app_handle.emit("model:download_error",
-                                format!("{}: copy failed: {}", model.id, e));
-                            return;
-                        }
-
-                        let mut metadata = load_metadata(&model_dir);
-                        metadata.models.insert(model.id.clone(), ModelStatus {
-                            status: "ready".into(),
-                            path: format!("{}/{}", model.architecture, model.filename),
-                            downloaded_at: Some(unix_timestamp()),
-                            size_bytes: model.size_bytes,
-                            sha256_verified: false,
-                        });
-                        let _ = save_metadata(&model_dir, &metadata);
-
-                        let _ = app_handle.emit("model:download_complete", &model.id);
-                        log::info!("Download complete: {}", model.name);
-                    }
-                    Err(e) => {
-                        log::error!("Download failed: {}", e);
-                        let _ = app_handle.emit("model:download_error",
-                            format!("{}: {}", model.id, e));
-                    }
-                }
-            }
+        let api_builder = hf_hub::api::sync::ApiBuilder::new();
+        let api = if let Some(ref token) = hf_token {
+            api_builder.with_token(Some(token.clone())).build()
+        } else {
+            api_builder.build()
+        };
+        let api = match api {
+            Ok(api) => api,
             Err(e) => {
                 log::error!("Failed to initialize HF API: {}", e);
                 let _ = app_handle.emit("model:download_error",
                     format!("{}: HF API init failed: {}", model.id, e));
+                return;
             }
+        };
+
+        if let Some(ref files) = model.files {
+            // Multi-file download
+            let total_files = files.len();
+            let mut file_statuses: HashMap<String, FileStatus> = HashMap::new();
+            let mut metadata = load_metadata(&model_dir);
+
+            // Load existing file statuses if resuming a partial download
+            if let Some(existing) = metadata.models.get(&model.id) {
+                if let Some(ref existing_files) = existing.files {
+                    file_statuses = existing_files.clone();
+                }
+            }
+
+            log::info!("Starting multi-file download: {} ({} files)", model.name, total_files);
+
+            let mut all_required_ok = true;
+
+            for (idx, file) in files.iter().enumerate() {
+                // Skip already-downloaded files
+                if let Some(fs) = file_statuses.get(&file.role) {
+                    if fs.status == "ready" {
+                        let existing_path = PathBuf::from(&model_dir).join(&fs.path);
+                        if existing_path.exists() {
+                            log::info!("Skipping already-downloaded file: {} ({})", file.filename, file.role);
+                            continue;
+                        }
+                    }
+                }
+
+                let _ = app_handle.emit("model:download_file_start", serde_json::json!({
+                    "model_id": model.id,
+                    "file_role": file.role,
+                    "file_index": idx,
+                    "total_files": total_files,
+                }));
+
+                log::info!("Downloading file {}/{}: {} from {}/{}", idx + 1, total_files, file.role, file.repo, file.filename);
+
+                let repo = api.model(file.repo.clone());
+                match repo.get(&file.filename) {
+                    Ok(cached_path) => {
+                        // Use just the basename for local storage (filename may contain subdirs like "split_files/vae/ae.safetensors")
+                        let local_name = std::path::Path::new(&file.filename)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| file.filename.clone());
+                        let target_path = target_dir.join(&local_name);
+                        if let Err(e) = std::fs::copy(&cached_path, &target_path) {
+                            log::error!("Failed to copy file {} to target dir: {}", local_name, e);
+                            file_statuses.insert(file.role.clone(), FileStatus {
+                                status: "failed".into(),
+                                path: format!("{}/{}", model.architecture, local_name),
+                            });
+                            if file.required {
+                                all_required_ok = false;
+                            }
+                            let _ = app_handle.emit("model:download_error",
+                                format!("{}: copy failed for {}: {}", model.id, file.role, e));
+                            // Save partial progress
+                            metadata.models.insert(model.id.clone(), ModelStatus {
+                                status: "partial".into(),
+                                path: format!("{}/", model.architecture),
+                                downloaded_at: Some(unix_timestamp()),
+                                size_bytes: model.size_bytes,
+                                sha256_verified: false,
+                                files: Some(file_statuses.clone()),
+                            });
+                            let _ = save_metadata(&model_dir, &metadata);
+                            continue;
+                        }
+
+                        file_statuses.insert(file.role.clone(), FileStatus {
+                            status: "ready".into(),
+                            path: format!("{}/{}", model.architecture, local_name),
+                        });
+
+                        let _ = app_handle.emit("model:download_file_complete", serde_json::json!({
+                            "model_id": model.id,
+                            "file_role": file.role,
+                        }));
+                    }
+                    Err(e) => {
+                        let e_str = format!("{}", e);
+                        let error_msg = if e_str.contains("401") || e_str.contains("403") || e_str.contains("gated") {
+                            format!("{}: {} needs authentication — set your HuggingFace token in Settings", model.id, file.repo)
+                        } else {
+                            format!("{}: download failed for {}: {}", model.id, file.role, e)
+                        };
+                        let local_name = std::path::Path::new(&file.filename)
+                            .file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| file.filename.clone());
+                        log::error!("Download failed for file {}: {}", local_name, e);
+                        file_statuses.insert(file.role.clone(), FileStatus {
+                            status: "failed".into(),
+                            path: format!("{}/{}", model.architecture, local_name),
+                        });
+                        if file.required {
+                            all_required_ok = false;
+                        }
+                        let _ = app_handle.emit("model:download_error", error_msg);
+                        // Save partial progress
+                        metadata.models.insert(model.id.clone(), ModelStatus {
+                            status: "partial".into(),
+                            path: format!("{}/", model.architecture),
+                            downloaded_at: Some(unix_timestamp()),
+                            size_bytes: model.size_bytes,
+                            sha256_verified: false,
+                            files: Some(file_statuses.clone()),
+                        });
+                        let _ = save_metadata(&model_dir, &metadata);
+                        continue;
+                    }
+                }
+            }
+
+            // Final status
+            let final_status = if all_required_ok { "ready" } else { "partial" };
+            metadata.models.insert(model.id.clone(), ModelStatus {
+                status: final_status.into(),
+                path: format!("{}/", model.architecture),
+                downloaded_at: Some(unix_timestamp()),
+                size_bytes: model.size_bytes,
+                sha256_verified: false,
+                files: Some(file_statuses),
+            });
+            let _ = save_metadata(&model_dir, &metadata);
+
+            if all_required_ok {
+                let _ = app_handle.emit("model:download_complete", &model.id);
+                log::info!("Multi-file download complete: {}", model.name);
+            } else {
+                let _ = app_handle.emit("model:download_error",
+                    format!("{}: some required files failed to download", model.id));
+                log::error!("Multi-file download incomplete: {}", model.name);
+            }
+        } else {
+            // Single-file download
+            let repo_name = match model.repo.as_ref() {
+                Some(r) => r,
+                None => {
+                    let _ = app_handle.emit("model:download_error",
+                        format!("{}: no repo specified", model.id));
+                    return;
+                }
+            };
+            let file_name = match model.filename.as_ref() {
+                Some(f) => f,
+                None => {
+                    let _ = app_handle.emit("model:download_error",
+                        format!("{}: no filename specified", model.id));
+                    return;
+                }
+            };
+
+            log::info!("Starting download: {} from {}/{}", model.name, repo_name, file_name);
+
+            let target_path = target_dir.join(file_name);
+
+            let repo = api.model(repo_name.clone());
+            match repo.get(file_name) {
+                Ok(cached_path) => {
+                    if let Err(e) = std::fs::copy(&cached_path, &target_path) {
+                        log::error!("Failed to copy model to target dir: {}", e);
+                        let _ = app_handle.emit("model:download_error",
+                            format!("{}: copy failed: {}", model.id, e));
+                        return;
+                    }
+
+                    let mut metadata = load_metadata(&model_dir);
+                    metadata.models.insert(model.id.clone(), ModelStatus {
+                        status: "ready".into(),
+                        path: format!("{}/{}", model.architecture, file_name),
+                        downloaded_at: Some(unix_timestamp()),
+                        size_bytes: model.size_bytes,
+                        sha256_verified: false,
+                        files: None,
+                    });
+                    let _ = save_metadata(&model_dir, &metadata);
+
+                    let _ = app_handle.emit("model:download_complete", &model.id);
+                    log::info!("Download complete: {}", model.name);
+                }
+                Err(e) => {
+                    let e_str = format!("{}", e);
+                    let error_msg = if e_str.contains("401") || e_str.contains("403") || e_str.contains("gated") {
+                        format!("{}: {} needs authentication — set your HuggingFace token in Settings", model.id, repo_name)
+                    } else {
+                        format!("{}: {}", model.id, e)
+                    };
+                    log::error!("Download failed: {}", e);
+                    let _ = app_handle.emit("model:download_error", error_msg);
+                }
+            }
+        }
+        })); // end catch_unwind
+        if let Err(panic) = result {
+            let msg = if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic.downcast_ref::<&str>() {
+                s.to_string()
+            } else {
+                "Unknown panic in download thread".to_string()
+            };
+            log::error!("Download thread panicked: {}", msg);
+            let _ = app_handle_panic.emit("model:download_error",
+                format!("{}: internal error: {}", model_id_panic, msg));
         }
     });
 
@@ -235,9 +481,24 @@ pub async fn delete_model(
     let mut metadata = load_metadata(&model_dir);
 
     if let Some(model_status) = metadata.models.remove(&model_id) {
-        let full_path = PathBuf::from(&model_dir).join(&model_status.path);
-        if full_path.exists() {
-            std::fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+        if let Some(ref files) = model_status.files {
+            // Multi-file model: delete each file individually
+            for file_status in files.values() {
+                let file_path = PathBuf::from(&model_dir).join(&file_status.path);
+                if file_path.exists() {
+                    let _ = std::fs::remove_file(&file_path);
+                }
+            }
+            // Try to remove the architecture directory if now empty
+            if let Some(parent) = PathBuf::from(&model_dir).join(&model_status.path).parent() {
+                let _ = std::fs::remove_dir(parent); // only succeeds if empty
+            }
+        } else {
+            // Single-file model
+            let full_path = PathBuf::from(&model_dir).join(&model_status.path);
+            if full_path.exists() {
+                std::fs::remove_file(&full_path).map_err(|e| e.to_string())?;
+            }
         }
         save_metadata(&model_dir, &metadata)?;
     }
@@ -257,12 +518,105 @@ pub async fn set_active_model(
         .ok_or_else(|| format!("Model '{}' not downloaded", model_id))?
         .clone();
 
-    let model_path = PathBuf::from(&model_dir).join(&model_status.path);
-    if !model_path.exists() {
-        return Err(format!("Model file not found: {}", model_path.display()));
+    // Load perf settings from store (fall back to defaults)
+    let mut perf = state.app_handle.store("settings.json")
+        .ok()
+        .and_then(|store| store.get("perf_settings"))
+        .and_then(|val| serde_json::from_value::<PerfSettings>(val).ok())
+        .unwrap_or_default();
+
+    // Custom models: single-file, no manifest entry needed
+    if model_id.starts_with("custom-") {
+        let model_path = PathBuf::from(&model_dir).join(&model_status.path);
+        if !model_path.exists() {
+            return Err(format!("Model file not found: {}", model_path.display()));
+        }
+        let paths = ModelPaths {
+            model_path: Some(model_path.to_string_lossy().into_owned()),
+            vae_path: None,
+            clip_l_path: None,
+            t5xxl_path: None,
+            diffusion_model_path: None,
+            llm_path: None,
+        };
+        state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
+        let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
+        *active = Some(model_id);
+        return Ok(());
     }
 
-    state.load_model(&model_path.to_string_lossy())
+    let manifest = load_manifest()?;
+    let manifest_model = manifest.models.iter()
+        .find(|m| m.id == model_id)
+        .ok_or_else(|| format!("Model '{}' not found in manifest", model_id))?
+        .clone();
+
+    let paths = if let Some(ref manifest_files) = manifest_model.files {
+        // Multi-file model (e.g. Flux): look up each role's path from metadata
+        let file_statuses = model_status.files
+            .ok_or_else(|| format!("Model '{}' has no file status in metadata", model_id))?;
+
+        let path_for_role = |role: &str| -> Option<String> {
+            file_statuses.get(role).and_then(|fs| {
+                let full = PathBuf::from(&model_dir).join(&fs.path);
+                if full.exists() { Some(full.to_string_lossy().into_owned()) } else { None }
+            })
+        };
+
+        // Verify all required files are present
+        for f in manifest_files {
+            if f.required {
+                path_for_role(&f.role).ok_or_else(|| {
+                    format!("Required file '{}' for model '{}' not found", f.role, model_id)
+                })?;
+            }
+        }
+
+        ModelPaths {
+            model_path: None,
+            diffusion_model_path: path_for_role("diffusion_model"),
+            clip_l_path: path_for_role("clip_l"),
+            t5xxl_path: path_for_role("t5xxl"),
+            vae_path: path_for_role("vae"),
+            llm_path: path_for_role("llm"),
+        }
+    } else {
+        // Single-file model (SD1.5, SDXL, etc.)
+        let model_path = PathBuf::from(&model_dir).join(&model_status.path);
+        if !model_path.exists() {
+            return Err(format!("Model file not found: {}", model_path.display()));
+        }
+        ModelPaths {
+            model_path: Some(model_path.to_string_lossy().into_owned()),
+            vae_path: None,
+            clip_l_path: None,
+            t5xxl_path: None,
+            diffusion_model_path: None,
+            llm_path: None,
+        }
+    };
+
+    // Auto-adjust perf settings based on model architecture.
+    // Reset architecture-specific overrides first so switching models doesn't carry over stale settings.
+    // (keep_vae_on_cpu produces black output — the CPU backend can't decode GPU latents correctly)
+    perf.offload_params_to_cpu = false;
+    perf.keep_clip_on_cpu = false;
+    perf.keep_vae_on_cpu = false;
+    perf.free_params_immediately = false;
+
+    let arch = &manifest_model.architecture;
+    match arch.as_str() {
+        "flux" | "z-image" => {
+            // Large models that may exceed VRAM. Enable offload to swap weights
+            // through CPU RAM while keeping compute on GPU.
+            perf.offload_params_to_cpu = true;
+            eprintln!("[blink] Auto-enabled offload-to-cpu for {} architecture", arch);
+        }
+        // SD 1.5, SDXL, custom: defaults are fine (all GPU, no offload)
+        _ => {}
+    }
+
+    state.load_model(paths, Some(perf))
         .map_err(|e| e.to_string())?;
 
     let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
@@ -277,6 +631,132 @@ pub async fn get_download_progress(
 ) -> Result<Option<DownloadProgress>, String> {
     // TODO: Track actual download progress with shared state
     Ok(None)
+}
+
+#[tauri::command]
+pub async fn import_custom_model(
+    state: State<'_, AppState>,
+    url: String,
+    name: Option<String>,
+) -> Result<(), String> {
+    let (repo, filename) = parse_hf_url(&url)?;
+
+    if !filename.ends_with(".gguf") && !filename.ends_with(".safetensors") {
+        return Err("Only .gguf and .safetensors files are supported".to_string());
+    }
+
+    // Sanitize filename — prevent path traversal
+    let safe_filename = std::path::Path::new(&filename)
+        .file_name()
+        .ok_or_else(|| "Invalid filename".to_string())?
+        .to_string_lossy()
+        .to_string();
+
+    let model_id = format!("custom-{}", {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
+    });
+    let display_name = name.unwrap_or_else(|| safe_filename.clone());
+    let model_dir = state.model_dir.lock().map_err(|e| e.to_string())?.clone();
+    let app_handle = state.app_handle.clone();
+
+    // Read HF token from store for gated model access
+    let hf_token: Option<String> = state.app_handle.store("settings.json")
+        .ok()
+        .and_then(|store| store.get("hf_token"))
+        .and_then(|val| serde_json::from_value(val).ok())
+        .flatten();
+
+    std::thread::spawn(move || {
+        let target_dir = PathBuf::from(&model_dir).join("custom");
+        if let Err(e) = std::fs::create_dir_all(&target_dir) {
+            log::error!("Failed to create custom model dir: {}", e);
+            let _ = app_handle.emit("model:download_error",
+                format!("{}: failed to create directory: {}", model_id, e));
+            return;
+        }
+
+        let api_builder = hf_hub::api::sync::ApiBuilder::new();
+        let api = if let Some(ref token) = hf_token {
+            api_builder.with_token(Some(token.clone())).build()
+        } else {
+            api_builder.build()
+        };
+        let api = match api {
+            Ok(a) => a,
+            Err(e) => {
+                log::error!("Failed to initialize HF API: {}", e);
+                let _ = app_handle.emit("model:download_error",
+                    format!("{}: HF API init failed: {}", model_id, e));
+                return;
+            }
+        };
+
+        log::info!("Importing custom model: {} from {}/{}", display_name, repo, filename);
+        let hf_repo = api.model(repo.clone());
+        match hf_repo.get(&filename) {
+            Ok(cached_path) => {
+                let target_path = target_dir.join(&safe_filename);
+                if let Err(e) = std::fs::copy(&cached_path, &target_path) {
+                    log::error!("Failed to copy custom model: {}", e);
+                    let _ = app_handle.emit("model:download_error",
+                        format!("{}: copy failed: {}", model_id, e));
+                    return;
+                }
+
+                let size_bytes = std::fs::metadata(&target_path).map(|m| m.len()).unwrap_or(0);
+
+                let mut metadata = load_metadata(&model_dir);
+                metadata.models.insert(model_id.clone(), ModelStatus {
+                    status: "ready".into(),
+                    path: format!("custom/{}", safe_filename),
+                    downloaded_at: Some(unix_timestamp()),
+                    size_bytes,
+                    sha256_verified: false,
+                    files: None,
+                });
+                if let Err(e) = save_metadata(&model_dir, &metadata) {
+                    log::error!("Failed to save metadata for custom model: {}", e);
+                }
+
+                let _ = app_handle.emit("model:download_complete", &model_id);
+                log::info!("Custom model import complete: {}", display_name);
+            }
+            Err(e) => {
+                log::error!("Custom model download failed: {}", e);
+                let _ = app_handle.emit("model:download_error",
+                    format!("{}: {}", model_id, e));
+            }
+        }
+    });
+
+    Ok(())
+}
+
+fn parse_hf_url(url: &str) -> Result<(String, String), String> {
+    // https://huggingface.co/{owner}/{repo}/blob/main/{filename}
+    // https://huggingface.co/{owner}/{repo}/resolve/main/{filename}
+    if url.starts_with("https://huggingface.co/") {
+        let path = url.trim_start_matches("https://huggingface.co/");
+        let parts: Vec<&str> = path.splitn(5, '/').collect();
+        if parts.len() >= 5 && (parts[2] == "blob" || parts[2] == "resolve") {
+            let repo = format!("{}/{}", parts[0], parts[1]);
+            let filename = parts[4..].join("/");
+            return Ok((repo, filename));
+        }
+        return Err(format!("Could not parse HuggingFace URL: {}", url));
+    }
+
+    // owner/repo:filename
+    if let Some(colon_pos) = url.find(':') {
+        let repo = url[..colon_pos].to_string();
+        let filename = url[colon_pos + 1..].to_string();
+        if !repo.is_empty() && !filename.is_empty() {
+            return Ok((repo, filename));
+        }
+    }
+
+    Err("Unrecognized URL format. Use:\n  https://huggingface.co/owner/repo/blob/main/model.gguf\n  owner/repo:model.gguf".to_string())
 }
 
 fn unix_timestamp() -> String {

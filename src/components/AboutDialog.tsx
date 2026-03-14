@@ -72,7 +72,14 @@ const AboutDialog: Component<AboutDialogProps> = (props) => {
         </div>
 
         <div style={{ "margin-bottom": "16px" }}>
-          <p>Version {version()}</p>
+          <p style={{ margin: "0 0 4px 0" }}>Version {version()}</p>
+          <p style={{
+            "font-size": "11px",
+            color: "var(--text-muted)",
+            margin: "0 0 10px 0",
+          }}>
+            A Beargle Industries project
+          </p>
           <p style={{
             "font-size": "13px",
             color: "var(--text-secondary)",
@@ -134,7 +141,7 @@ const AboutDialog: Component<AboutDialogProps> = (props) => {
           "margin-top": "16px",
           "text-align": "center",
           "font-size": "12px",
-          color: "var(--text-secondary)",
+          color: "var(--text-muted)",
         }}>
           MIT License | Beargle Industries 2026
         </div>

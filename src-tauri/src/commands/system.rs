@@ -6,15 +6,43 @@ pub struct SystemInfo {
     pub compiled_backend: String,
     pub os: String,
     pub arch: String,
+    pub gpu_name: Option<String>,
+    pub vram_total_mb: Option<u64>,
+    pub vram_free_mb: Option<u64>,
 }
 
 #[tauri::command]
 pub fn get_system_info() -> SystemInfo {
+    let (gpu_name, vram_total, vram_free) = detect_gpu_info();
     SystemInfo {
         compiled_backend: compiled_backend().to_string(),
         os: std::env::consts::OS.to_string(),
         arch: std::env::consts::ARCH.to_string(),
+        gpu_name,
+        vram_total_mb: vram_total,
+        vram_free_mb: vram_free,
     }
+}
+
+fn detect_gpu_info() -> (Option<String>, Option<u64>, Option<u64>) {
+    // Try nvidia-smi for NVIDIA GPUs
+    if let Ok(output) = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let line = stdout.trim();
+            let parts: Vec<&str> = line.split(", ").collect();
+            if parts.len() >= 3 {
+                let name = parts[0].trim().to_string();
+                let total: Option<u64> = parts[1].trim().parse().ok();
+                let free: Option<u64> = parts[2].trim().parse().ok();
+                return (Some(name), total, free);
+            }
+        }
+    }
+    (None, None, None)
 }
 
 #[tauri::command]

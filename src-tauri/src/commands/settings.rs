@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tauri_plugin_store::StoreExt;
-use crate::state::AppState;
+use crate::state::{AppState, PerfSettings};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppSettings {
@@ -43,6 +43,24 @@ pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) ->
     store.set("settings", serde_json::to_value(&settings).map_err(|e| e.to_string())?);
     store.save().map_err(|e| e.to_string())?;
     log::info!("Settings saved: theme={}", settings.theme);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_perf_settings(state: State<'_, AppState>) -> Result<PerfSettings, String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    match store.get("perf_settings") {
+        Some(val) => serde_json::from_value(val).map_err(|e| e.to_string()),
+        None => Ok(PerfSettings::default()),
+    }
+}
+
+#[tauri::command]
+pub async fn save_perf_settings(state: State<'_, AppState>, settings: PerfSettings) -> Result<(), String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("perf_settings", serde_json::to_value(&settings).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    log::info!("Perf settings saved: flash_attn={}, mmap={}", settings.flash_attn, settings.enable_mmap);
     Ok(())
 }
 

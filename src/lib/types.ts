@@ -47,6 +47,9 @@ export interface SystemInfo {
   compiled_backend: string;
   os: string;
   arch: string;
+  gpu_name: string | null;
+  vram_total_mb: number | null;
+  vram_free_mb: number | null;
 }
 
 export interface AppSettings {
@@ -57,6 +60,23 @@ export interface AppSettings {
   last_model: string | null;
   gallery_columns: number;
   auto_save_gallery: boolean;
+}
+
+export interface PerfSettings {
+  flash_attn: boolean;
+  diffusion_flash_attn: boolean;
+  enable_mmap: boolean;
+  free_params_immediately: boolean;
+  keep_clip_on_cpu: boolean;
+  keep_vae_on_cpu: boolean;
+  offload_params_to_cpu: boolean;
+}
+
+export interface FileDownloadProgress {
+  model_id: string;
+  file_role: string;
+  file_index: number;
+  total_files: number;
 }
 
 export interface GalleryItem {

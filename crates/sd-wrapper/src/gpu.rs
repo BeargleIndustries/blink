@@ -22,19 +22,20 @@ impl fmt::Display for GpuBackend {
     }
 }
 
-/// Detect the compiled GPU backend based on cargo feature flags.
+/// Detect the compiled GPU backend based on auto-detected cfg flags.
+/// These flags are emitted by sd-wrapper's build.rs (mirroring sd-sys detection).
 /// This returns what was compiled in, not necessarily what's available at runtime.
 /// sd.cpp handles runtime fallback internally.
 pub fn compiled_backend() -> GpuBackend {
-    #[cfg(feature = "metal")]
+    #[cfg(has_metal)]
     return GpuBackend::Metal;
 
-    #[cfg(feature = "cuda")]
+    #[cfg(has_cuda)]
     return GpuBackend::Cuda;
 
-    #[cfg(feature = "vulkan")]
+    #[cfg(has_vulkan)]
     return GpuBackend::Vulkan;
 
-    #[cfg(not(any(feature = "metal", feature = "cuda", feature = "vulkan")))]
+    #[cfg(not(any(has_metal, has_cuda, has_vulkan)))]
     return GpuBackend::Cpu;
 }

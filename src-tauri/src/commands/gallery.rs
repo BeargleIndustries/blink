@@ -66,10 +66,21 @@ pub async fn get_gallery(state: State<'_, AppState>) -> Result<Vec<GalleryItem>,
                         let thumb_path = gallery_dir.join(format!("{}_thumb.jpg", stem));
 
                         if png_path.exists() {
+                            // Embed thumbnail as base64 data URL
+                            let thumb_data_url = if thumb_path.exists() {
+                                if let Ok(bytes) = std::fs::read(&thumb_path) {
+                                    format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes))
+                                } else {
+                                    String::new()
+                                }
+                            } else {
+                                String::new()
+                            };
+
                             items.push(GalleryItem {
                                 id: stem.clone(),
                                 filename: format!("{}.png", stem),
-                                thumbnail_path: thumb_path.to_string_lossy().into_owned(),
+                                thumbnail_path: thumb_data_url,
                                 full_path: png_path.to_string_lossy().into_owned(),
                                 prompt: meta.prompt,
                                 negative_prompt: meta.negative_prompt,
@@ -178,10 +189,21 @@ pub async fn save_to_gallery(
     let json_str = serde_json::to_string_pretty(&meta).map_err(|e| e.to_string())?;
     std::fs::write(&json_path, json_str).map_err(|e| e.to_string())?;
 
+    // Read thumbnail back as base64 data URL
+    let thumb_data_url = if thumb_path.exists() {
+        if let Ok(bytes) = std::fs::read(&thumb_path) {
+            format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(&bytes))
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     Ok(GalleryItem {
         id: id.clone(),
         filename: format!("{}.png", id),
-        thumbnail_path: thumb_path.to_string_lossy().into_owned(),
+        thumbnail_path: thumb_data_url,
         full_path: png_path.to_string_lossy().into_owned(),
         prompt,
         negative_prompt,
@@ -204,6 +226,22 @@ fn rand_suffix() -> u32 {
     let mut h = DefaultHasher::new();
     std::time::SystemTime::now().hash(&mut h);
     (h.finish() % 1_000_000) as u32
+}
+
+#[tauri::command]
+pub async fn load_gallery_image(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<String, String> {
+    let gallery_dir = get_gallery_dir(&state.app_handle)?;
+    let png_path = gallery_dir.join(format!("{}.png", item_id));
+
+    if !png_path.exists() {
+        return Err(format!("Gallery item '{}' not found", item_id));
+    }
+
+    let bytes = std::fs::read(&png_path).map_err(|e| e.to_string())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(&bytes))
 }
 
 #[tauri::command]

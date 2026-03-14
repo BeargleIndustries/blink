@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
+use std::time::Duration;
 use crate::error::SdError;
 use crate::ffi_bridge::SdCppContext;
 use crate::types::*;
@@ -22,10 +23,10 @@ pub enum InferenceCommand {
 }
 
 pub struct SdContext {
-    model_path: String,
+    model_path: Option<String>,
     command_tx: mpsc::Sender<InferenceCommand>,
     cancel_flag: Arc<AtomicBool>,
-    _thread: thread::JoinHandle<()>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl SdContext {
@@ -36,11 +37,27 @@ impl SdContext {
     pub fn with_cancel_flag(config: ContextConfig, cancel_flag: Arc<AtomicBool>) -> Result<Self, SdError> {
         let model_path = config.model_path.clone();
 
-        // Validate model file exists
-        if !std::path::Path::new(&config.model_path).exists() {
-            return Err(SdError::ModelNotFound { path: config.model_path });
+        // Validate that at least one model path is provided
+        if config.model_path.is_none() && config.diffusion_model_path.is_none() {
+            return Err(SdError::InvalidParams {
+                reason: "No model path provided — set model_path (SD/SDXL) or diffusion_model_path (Flux)".into(),
+            });
+        }
+
+        // Validate model file exists if provided
+        if let Some(ref mp) = config.model_path {
+            if !std::path::Path::new(mp).exists() {
+                return Err(SdError::ModelNotFound { path: mp.clone() });
+            }
+        }
+        if let Some(ref dp) = config.diffusion_model_path {
+            if !std::path::Path::new(dp).exists() {
+                return Err(SdError::ModelNotFound { path: dp.clone() });
+            }
         }
         let (command_tx, command_rx) = mpsc::channel::<InferenceCommand>();
+        // Channel to report whether model loading succeeded or failed
+        let (load_tx, load_rx) = mpsc::channel::<Result<(), String>>();
 
         let thread_config = config.clone();
         let thread_cancel = cancel_flag.clone();
@@ -48,29 +65,21 @@ impl SdContext {
         let handle = thread::Builder::new()
             .name("sd-inference".into())
             .spawn(move || {
-                log::info!("Inference thread started for model: {}", thread_config.model_path);
+                let model_display = thread_config.model_path.as_deref()
+                    .or(thread_config.diffusion_model_path.as_deref())
+                    .unwrap_or("<none>");
+                eprintln!("[blink] Inference thread started, loading model: {}", model_display);
 
                 // Initialize sd.cpp context (loads the model)
                 let cpp_ctx = match SdCppContext::new(&thread_config) {
-                    Ok(ctx) => ctx,
+                    Ok(ctx) => {
+                        eprintln!("[blink] Model loaded successfully");
+                        let _ = load_tx.send(Ok(()));
+                        ctx
+                    }
                     Err(e) => {
-                        log::error!("Failed to load model: {}", e);
-                        // Drain remaining commands and send errors
-                        while let Ok(cmd) = command_rx.try_recv() {
-                            match cmd {
-                                InferenceCommand::Txt2Img { result_tx, .. } => {
-                                    let _ = result_tx.send(Err(SdError::ContextCreationFailed {
-                                        reason: format!("Model failed to load: {}", e),
-                                    }));
-                                }
-                                InferenceCommand::Img2Img { result_tx, .. } => {
-                                    let _ = result_tx.send(Err(SdError::ContextCreationFailed {
-                                        reason: format!("Model failed to load: {}", e),
-                                    }));
-                                }
-                                InferenceCommand::Shutdown => {}
-                            }
-                        }
+                        eprintln!("[blink] Failed to load model: {}", e);
+                        let _ = load_tx.send(Err(format!("{}", e)));
                         return;
                     }
                 };
@@ -78,6 +87,7 @@ impl SdContext {
                 while let Ok(cmd) = command_rx.recv() {
                     match cmd {
                         InferenceCommand::Txt2Img { params, progress_cb, result_tx } => {
+                            log::info!("Starting txt2img: {}x{}, {} steps", params.width, params.height, params.steps);
                             thread_cancel.store(false, Ordering::SeqCst);
                             let result = cpp_ctx.generate(
                                 &params,
@@ -113,11 +123,31 @@ impl SdContext {
                 reason: format!("Failed to spawn inference thread: {}", e),
             })?;
 
+        // Wait for model loading result (blocks until the model is loaded or fails)
+        match load_rx.recv_timeout(Duration::from_secs(300)) {
+            Ok(Ok(())) => {}  // Model loaded successfully
+            Ok(Err(e)) => {
+                return Err(SdError::ContextCreationFailed {
+                    reason: format!("Model failed to load: {}", e),
+                });
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                return Err(SdError::ContextCreationFailed {
+                    reason: "Model loading timed out after 5 minutes".into(),
+                });
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(SdError::ContextCreationFailed {
+                    reason: "Inference thread crashed during model loading".into(),
+                });
+            }
+        }
+
         Ok(Self {
             model_path,
             command_tx,
             cancel_flag,
-            _thread: handle,
+            thread: Some(handle),
         })
     }
 
@@ -133,8 +163,13 @@ impl SdContext {
                 reason: "Inference thread has stopped".into(),
             })?;
 
-        result_rx.recv().map_err(|_| SdError::FfiPanic {
-            message: "Inference thread crashed during generation".into(),
+        result_rx.recv_timeout(Duration::from_secs(1800)).map_err(|e| match e {
+            mpsc::RecvTimeoutError::Timeout => SdError::FfiPanic {
+                message: "Generation timed out after 30 minutes".into(),
+            },
+            mpsc::RecvTimeoutError::Disconnected => SdError::FfiPanic {
+                message: "Inference thread crashed during generation".into(),
+            },
         })?
     }
 
@@ -151,8 +186,13 @@ impl SdContext {
                 reason: "Inference thread has stopped".into(),
             })?;
 
-        result_rx.recv().map_err(|_| SdError::FfiPanic {
-            message: "Inference thread crashed during generation".into(),
+        result_rx.recv_timeout(Duration::from_secs(1800)).map_err(|e| match e {
+            mpsc::RecvTimeoutError::Timeout => SdError::FfiPanic {
+                message: "Generation timed out after 30 minutes".into(),
+            },
+            mpsc::RecvTimeoutError::Disconnected => SdError::FfiPanic {
+                message: "Inference thread crashed during generation".into(),
+            },
         })?
     }
 
@@ -160,8 +200,8 @@ impl SdContext {
         self.cancel_flag.store(true, Ordering::SeqCst);
     }
 
-    pub fn model_path(&self) -> &str {
-        &self.model_path
+    pub fn model_path(&self) -> Option<&str> {
+        self.model_path.as_deref()
     }
 }
 
@@ -169,5 +209,8 @@ impl Drop for SdContext {
     fn drop(&mut self) {
         log::info!("Dropping SdContext, sending shutdown...");
         let _ = self.command_tx.send(InferenceCommand::Shutdown);
+        if let Some(handle) = self.thread.take() {
+            let _ = handle.join();
+        }
     }
 }

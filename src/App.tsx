@@ -1,6 +1,6 @@
 import { Component, createSignal, onMount, onCleanup, Show } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress } from "./lib/types";
+import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, PerfSettings, FileDownloadProgress } from "./lib/types";
 import {
   generateImage,
   cancelGeneration,
@@ -10,6 +10,12 @@ import {
   deleteModel,
   setActiveModel,
   getGallery,
+  saveToGallery,
+  loadGalleryImage,
+  getPerfSettings,
+  savePerfSettings,
+  getHfToken,
+  setHfToken,
 } from "./lib/tauri-api";
 import { getDefaultsForModel } from "./lib/defaults";
 
@@ -43,6 +49,20 @@ const App: Component = () => {
   const [generatedImage, setGeneratedImage] = createSignal<string | null>(null);
   const [inputImage, setInputImage] = createSignal<string | null>(null);
   const [errorMessage, setErrorMessage] = createSignal<string | null>(null);
+  const [modelLoading, setModelLoading] = createSignal(false);
+  const [downloading, setDownloading] = createSignal<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = createSignal<{ modelId: string; fileRole: string; fileIndex: number; totalFiles: number } | null>(null);
+  const [hfToken, setHfTokenState] = createSignal<string | null>(null);
+
+  const [perfSettings, setPerfSettings] = createSignal<PerfSettings>({
+    flash_attn: true,
+    diffusion_flash_attn: true,
+    enable_mmap: true,
+    free_params_immediately: false,
+    keep_clip_on_cpu: false,
+    keep_vae_on_cpu: false,
+    offload_params_to_cpu: false,
+  });
 
   // Generation settings
   const [steps, setSteps] = createSignal(20);
@@ -52,6 +72,10 @@ const App: Component = () => {
   const [height, setHeight] = createSignal(512);
   const [sampler, setSampler] = createSignal("euler_a");
   const [strength, setStrength] = createSignal(0.75);
+
+  // Track last generation params for gallery save
+  let lastPrompt = "";
+  let lastNegativePrompt = "";
 
   const mode = () => (inputImage() ? "img2img" : "txt2img");
 
@@ -73,15 +97,19 @@ const App: Component = () => {
   onMount(async () => {
     // Load data
     try {
-      const [loadedModels, sysInfo, gallery] = await Promise.all([
+      const [loadedModels, sysInfo, gallery, perf, token] = await Promise.all([
         getModels(),
         getSystemInfo(),
         getGallery(),
+        getPerfSettings(),
+        getHfToken(),
       ]);
 
       setModels(loadedModels);
       setSystemInfo(sysInfo);
       setGalleryItems(gallery);
+      setPerfSettings(perf);
+      setHfTokenState(token);
 
       const active = loadedModels.find((m) => m.active);
       if (active) {
@@ -105,14 +133,36 @@ const App: Component = () => {
         setElapsed(event.payload.elapsed_secs);
       }),
 
-      listen<{ image_base64: string; width: number; height: number; seed: number; generation_time_secs: number }>("generation:complete", (event) => {
+      listen<{ image_base64: string; width: number; height: number; seed: number; generation_time_secs: number }>("generation:complete", async (event) => {
         setGenerating(false);
         setGeneratedImage(event.payload.image_base64);
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
         setErrorMessage(null);
-        getGallery().then(setGalleryItems).catch(console.error);
+
+        // Auto-save to gallery
+        const model = activeModel();
+        try {
+          const item = await saveToGallery({
+            imageBase64: event.payload.image_base64,
+            prompt: lastPrompt,
+            negativePrompt: lastNegativePrompt,
+            modelId: activeModelId() ?? "unknown",
+            modelName: model?.name ?? "Unknown",
+            width: event.payload.width,
+            height: event.payload.height,
+            steps: steps(),
+            cfgScale: cfgScale(),
+            seed: event.payload.seed,
+            sampler: sampler(),
+            generationTimeSecs: event.payload.generation_time_secs,
+          });
+          setGalleryItems((prev) => [item, ...prev]);
+        } catch (err) {
+          console.error("Failed to save to gallery:", err);
+          getGallery().then(setGalleryItems).catch(console.error);
+        }
       }),
 
       listen<{ message: string; recovery: string | null }>("generation:error", (event) => {
@@ -133,13 +183,30 @@ const App: Component = () => {
         setElapsed(0);
       }),
 
+      listen<FileDownloadProgress>("model:download_file_start", (event) => {
+        setDownloadProgress({
+          modelId: event.payload.model_id,
+          fileRole: event.payload.file_role,
+          fileIndex: event.payload.file_index,
+          totalFiles: event.payload.total_files,
+        });
+      }),
+
+      listen<{ model_id: string; file_role: string }>("model:download_file_complete", (_event) => {
+        // Next file_start will update progress; no action needed here
+      }),
+
       listen("model:download_complete", async () => {
+        setDownloading(null);
+        setDownloadProgress(null);
         const updated = await getModels().catch(() => models());
         setModels(updated);
         setShowWizard(false);
       }),
 
       listen<string>("model:download_error", (event) => {
+        setDownloading(null);
+        setDownloadProgress(null);
         console.error("Model download error:", event.payload);
         setErrorMessage(`Download failed: ${event.payload}`);
         setTimeout(() => setErrorMessage(null), 5000);
@@ -149,6 +216,8 @@ const App: Component = () => {
 
   const handleGenerate = async (prompt: string, negativePrompt: string) => {
     if (!activeModelId()) return;
+    lastPrompt = prompt;
+    lastNegativePrompt = negativePrompt;
     setGenerating(true);
     setGeneratedImage(null);
     setCurrentStep(0);
@@ -184,6 +253,10 @@ const App: Component = () => {
   const handleCancel = async () => {
     try {
       await cancelGeneration();
+      setGenerating(false);
+      setCurrentStep(0);
+      setTotalSteps(0);
+      setElapsed(0);
     } catch (err) {
       console.error("Cancel failed:", err);
     }
@@ -191,23 +264,30 @@ const App: Component = () => {
 
   const handleSelectModel = async (modelId: string) => {
     try {
+      setModelLoading(true);
+      setErrorMessage(null);
       await setActiveModel(modelId);
       const updated = await getModels();
       setModels(updated);
       setActiveModelId(modelId);
       applyModelDefaults(modelId);
-    } catch (err) {
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(`Failed to load model: ${msg}`);
+      setTimeout(() => setErrorMessage(null), 10000);
       console.error("Failed to set active model:", err);
+    } finally {
+      setModelLoading(false);
     }
   };
 
   const handleDownloadModel = async (modelId: string) => {
     try {
+      setDownloading(modelId);
       await downloadModel(modelId);
-      const updated = await getModels();
-      setModels(updated);
-      setShowWizard(false);
+      // Don't close wizard here — wait for download_complete event
     } catch (err) {
+      setDownloading(null);
       console.error("Failed to download model:", err);
     }
   };
@@ -225,9 +305,31 @@ const App: Component = () => {
     }
   };
 
-  const handleGallerySelect = (item: GalleryItem) => {
-    // Use asset protocol to load from disk path
-    setGeneratedImage(`asset://localhost/${item.filename}`);
+  const handleGallerySelect = async (item: GalleryItem) => {
+    try {
+      const base64 = await loadGalleryImage(item.id);
+      setGeneratedImage(base64);
+    } catch (err) {
+      console.error("Failed to load gallery image:", err);
+    }
+  };
+
+  const handleHfTokenChange = async (token: string | null) => {
+    setHfTokenState(token);
+    try {
+      await setHfToken(token);
+    } catch (err) {
+      console.error("Failed to save HF token:", err);
+    }
+  };
+
+  const handlePerfChange = async (settings: PerfSettings) => {
+    setPerfSettings(settings);
+    try {
+      await savePerfSettings(settings);
+    } catch (err) {
+      console.error("Failed to save perf settings:", err);
+    }
   };
 
   const handleImageDrop = (imageData: string) => {
@@ -267,6 +369,31 @@ const App: Component = () => {
             activeModelId={activeModelId()}
             onSelectModel={handleSelectModel}
           />
+          <Show when={systemInfo()}>
+            {(() => {
+              const info = systemInfo()!;
+              const isCpu = info.compiled_backend.toLowerCase() === "cpu";
+              return (
+                <span
+                  title={isCpu
+                    ? "No GPU detected. Install CUDA Toolkit (NVIDIA) or use Metal (Mac) for faster generation."
+                    : `Using ${info.compiled_backend} acceleration`}
+                  style={{
+                    padding: "2px 8px",
+                    "border-radius": "var(--radius-pill)",
+                    "font-size": "11px",
+                    "font-weight": "600",
+                    background: isCpu ? "rgba(245, 158, 11, 0.1)" : "rgba(34, 197, 94, 0.1)",
+                    color: isCpu ? "var(--warning)" : "var(--success)",
+                    border: `1px solid ${isCpu ? "rgba(245, 158, 11, 0.2)" : "rgba(34, 197, 94, 0.2)"}`,
+                    cursor: "default",
+                  }}
+                >
+                  {isCpu ? "CPU" : info.compiled_backend}
+                </span>
+              );
+            })()}
+          </Show>
           <button
             onClick={() => setShowBrowser(true)}
             style={{
@@ -330,7 +457,7 @@ const App: Component = () => {
             width: "512px",
             "max-width": "100%",
             padding: "8px 12px",
-            background: "rgba(244, 67, 54, 0.12)",
+            background: "rgba(239, 68, 68, 0.12)",
             border: "1px solid var(--error)",
             "border-radius": "var(--radius)",
             color: "var(--error)",
@@ -344,6 +471,8 @@ const App: Component = () => {
           onGenerate={handleGenerate}
           onCancel={handleCancel}
           generating={generating()}
+          modelLoading={modelLoading()}
+          modelReady={!!activeModelId() && !modelLoading()}
           mode={mode()}
         />
 
@@ -363,6 +492,10 @@ const App: Component = () => {
           strength={strength()}
           onStrengthChange={setStrength}
           showStrength={mode() === "img2img"}
+          perfSettings={perfSettings()}
+          onPerfChange={handlePerfChange}
+          hfToken={hfToken()}
+          onHfTokenChange={handleHfTokenChange}
         />
       </main>
 
@@ -388,6 +521,7 @@ const App: Component = () => {
         <FirstRunWizard
           models={models()}
           systemInfo={systemInfo()}
+          downloading={downloading()}
           onDownload={handleDownloadModel}
           onSkip={() => setShowWizard(false)}
         />
@@ -396,6 +530,8 @@ const App: Component = () => {
       <Show when={showBrowser()}>
         <ModelBrowser
           models={models()}
+          downloading={downloading()}
+          downloadProgress={downloadProgress()}
           onDownload={handleDownloadModel}
           onDelete={handleDeleteModel}
           onSelect={(id) => {
@@ -403,6 +539,7 @@ const App: Component = () => {
             setShowBrowser(false);
           }}
           onClose={() => setShowBrowser(false)}
+          vramTotalMb={systemInfo()?.vram_total_mb}
         />
       </Show>
 

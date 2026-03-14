@@ -21,10 +21,13 @@ const LicenseInfo: Component<LicenseInfoProps> = (props) => {
     }}>
       <span style={{
         padding: "2px 6px",
-        "border-radius": "4px",
+        "border-radius": "var(--radius-pill)",
         background: props.commercial
-          ? "rgba(76, 175, 80, 0.2)"
-          : "rgba(244, 67, 54, 0.2)",
+          ? "rgba(34, 197, 94, 0.1)"
+          : "rgba(239, 68, 68, 0.1)",
+        border: props.commercial
+          ? "1px solid rgba(34, 197, 94, 0.2)"
+          : "1px solid rgba(239, 68, 68, 0.2)",
         color: props.commercial ? "var(--success)" : "var(--error)",
         "font-weight": "500",
       }}>

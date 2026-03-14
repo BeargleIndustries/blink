@@ -14,6 +14,12 @@
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
+    {
+      "identifier": "fs:allow-appdata-read-recursive",
+      "allow": [
+        { "path": "$APPDATA/**" }
+      ]
+    },
     "shell:default",
     "shell:allow-open",
     "store:default"

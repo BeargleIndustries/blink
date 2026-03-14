@@ -66,7 +66,7 @@ const Gallery: Component<GalleryProps> = (props) => {
               title={item.prompt}
             >
               <img
-                src={`asset://localhost/${item.thumbnail_path}`}
+                src={item.thumbnail_path}
                 style={{
                   width: "100%",
                   height: "100%",

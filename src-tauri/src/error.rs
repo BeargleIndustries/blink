@@ -1,6 +1,7 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[allow(dead_code)]
 pub struct AppError {
     pub message: String,
     pub recovery: Option<String>,

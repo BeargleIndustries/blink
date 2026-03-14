@@ -4,6 +4,7 @@ import type { ModelInfo, SystemInfo } from "../lib/types";
 interface FirstRunWizardProps {
   models: ModelInfo[];
   systemInfo: SystemInfo | null;
+  downloading: string | null;
   onDownload: (modelId: string) => void;
   onSkip: () => void;
 }
@@ -11,9 +12,9 @@ interface FirstRunWizardProps {
 const FirstRunWizard: Component<FirstRunWizardProps> = (props) => {
   const recommendedModel = () => {
     if (props.systemInfo?.compiled_backend === "cpu") {
-      return "sd15-q8";
+      return "sd15-q5";
     }
-    return "sd15-q8";
+    return "sd15-q5";
   };
 
   return (
@@ -30,20 +31,26 @@ const FirstRunWizard: Component<FirstRunWizardProps> = (props) => {
       "z-index": "200",
     }}>
       <div style={{
-        background: "var(--bg-primary)",
+        background: "var(--bg-secondary)",
+        border: "1px solid var(--border)",
         "border-radius": "12px",
         padding: "32px",
         "max-width": "500px",
         width: "90%",
         "text-align": "center",
       }}>
-        <h1 style={{ "margin-bottom": "8px", "font-size": "24px" }}>
+        <h1 style={{ "margin-bottom": "4px", "font-size": "24px", color: "var(--text-primary)" }}>
           Welcome to Blink
         </h1>
-        <p style={{ color: "var(--text-secondary)", "margin-bottom": "24px" }}>
-          To get started, download an AI model. We recommend starting with{" "}
-          <strong>Stable Diffusion 1.5</strong> — it's fast and works on most
-          hardware.
+        <p style={{
+          "font-size": "11px",
+          color: "var(--text-muted)",
+          margin: "0 0 16px 0",
+        }}>
+          A Beargle Industries project
+        </p>
+        <p style={{ color: "var(--text-secondary)", "margin-bottom": "24px", "font-size": "14px" }}>
+          Download a model to get started. <strong style={{ color: "var(--text-primary)" }}>Stable Diffusion 1.5</strong> is fast and works on most hardware.
         </p>
 
         <Show when={props.systemInfo}>
@@ -65,35 +72,43 @@ const FirstRunWizard: Component<FirstRunWizardProps> = (props) => {
           <For each={props.models}>
             {(model) => {
               const isRecommended = () => model.id === recommendedModel();
+              const isDownloading = () => props.downloading === model.id;
               return (
                 <button
                   onClick={() => props.onDownload(model.id)}
+                  disabled={!!props.downloading}
                   style={{
                     padding: "12px 16px",
-                    background: isRecommended()
-                      ? "var(--accent)"
-                      : "var(--bg-secondary)",
-                    border: isRecommended()
+                    background: isDownloading()
+                      ? "var(--bg-tertiary)"
+                      : isRecommended()
+                        ? "var(--accent)"
+                        : "var(--bg-secondary)",
+                    border: isRecommended() && !isDownloading()
                       ? "none"
                       : "1px solid var(--border)",
                     "border-radius": "var(--radius)",
-                    color: isRecommended() ? "white" : "var(--text-primary)",
-                    cursor: "pointer",
+                    color: isDownloading()
+                      ? "var(--text-secondary)"
+                      : isRecommended() ? "white" : "var(--text-primary)",
+                    cursor: props.downloading ? "not-allowed" : "pointer",
                     "text-align": "left",
                     "font-size": "14px",
+                    opacity: props.downloading && !isDownloading() ? "0.5" : "1",
                   }}
                 >
                   <div style={{ "font-weight": "bold" }}>
-                    {model.name}
-                    {isRecommended() ? " (Recommended)" : ""}
+                    {isDownloading() ? `Downloading ${model.name}...` : model.name}
+                    {!isDownloading() && isRecommended() ? " (Recommended)" : ""}
                   </div>
                   <div style={{
                     "font-size": "12px",
                     "margin-top": "4px",
                     opacity: "0.8",
                   }}>
-                    {(model.size_bytes / 1_000_000_000).toFixed(1)} GB | ~
-                    {(model.vram_mb / 1000).toFixed(1)} GB VRAM
+                    {isDownloading()
+                      ? "This may take a few minutes"
+                      : `${(model.size_bytes / 1_000_000_000).toFixed(1)} GB | ~${(model.vram_mb / 1000).toFixed(1)} GB VRAM`}
                   </div>
                 </button>
               );

@@ -74,7 +74,6 @@ pub async fn generate_image(
     state.generating.store(true, Ordering::SeqCst);
 
     let app_handle = state.app_handle.clone();
-    let cancel_flag = state.cancel_flag.clone();
 
     let params = GenerationParams {
         prompt: request.prompt.clone(),
@@ -132,10 +131,33 @@ pub async fn generate_image(
 
     match result {
         Ok(image) => {
+            if state.cancel_flag.load(Ordering::SeqCst) {
+                state.generating.store(false, Ordering::SeqCst);
+                let _ = app_handle.emit("generation:cancelled", ());
+                return Err("Generation cancelled".into());
+            }
+
             let elapsed = start.elapsed().as_secs_f32();
 
-            let png_data = encode_image_to_png(&image.data, image.width, image.height);
+            log::info!(
+                "Image generated: {}x{}, data len={}, first 16 bytes={:?}",
+                image.width, image.height, image.data.len(),
+                &image.data[..image.data.len().min(16)]
+            );
+
+            let png_data = match encode_image_to_png(&image.data, image.width, image.height) {
+                Ok(data) => data,
+                Err(e) => {
+                    let _ = app_handle.emit("generation:error", GenerationErrorEvent {
+                        message: e.clone(),
+                        recovery: None,
+                    });
+                    return Err(e);
+                }
+            };
+            log::info!("PNG encoded: {} bytes", png_data.len());
             let base64_image = base64_encode(&png_data);
+            log::info!("Base64 length: {}", base64_image.len());
 
             let _ = app_handle.emit("generation:complete", GenerationCompleteEvent {
                 image_base64: base64_image.clone(),
@@ -168,18 +190,19 @@ pub async fn cancel_generation(
 ) -> Result<(), String> {
     // Shared AtomicBool flag — SdContext uses the same Arc, no mutex needed
     state.cancel_flag.store(true, Ordering::SeqCst);
+    state.generating.store(false, Ordering::SeqCst);
     Ok(())
 }
 
-fn encode_image_to_png(rgba_data: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn encode_image_to_png(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, RgbaImage};
     let img: RgbaImage = ImageBuffer::from_raw(width, height, rgba_data.to_vec())
-        .expect("Invalid image dimensions");
+        .ok_or_else(|| format!("Invalid image dimensions: {}x{} with {} bytes", width, height, rgba_data.len()))?;
     let mut buf = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut buf);
     img.write_to(&mut cursor, image::ImageFormat::Png)
-        .expect("Failed to encode PNG");
-    buf
+        .map_err(|e| format!("Failed to encode PNG: {}", e))?;
+    Ok(buf)
 }
 
 fn base64_encode(data: &[u8]) -> String {
