@@ -8,6 +8,7 @@ export interface GenerationRequest {
   seed?: number;
   sampler?: string;
   input_image?: number[];
+  mask_image?: number[];
   strength?: number;
 }
 

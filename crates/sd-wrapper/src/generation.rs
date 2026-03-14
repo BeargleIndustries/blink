@@ -16,8 +16,9 @@ pub fn generate_txt2img(
 pub fn generate_img2img(
     ctx: &SdContext,
     input_image: &[u8],
+    mask_image: Option<&[u8]>,
     params: &Img2ImgParams,
     progress_cb: Option<ProgressCallback>,
 ) -> Result<GeneratedImage, SdError> {
-    ctx.img2img(input_image.to_vec(), params.clone(), progress_cb)
+    ctx.img2img(input_image.to_vec(), mask_image.map(|m| m.to_vec()), params.clone(), progress_cb)
 }

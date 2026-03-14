@@ -152,6 +152,7 @@ impl SdCppContext {
         &self,
         params: &GenerationParams,
         input_image: Option<&[u8]>,
+        mask_image: Option<&[u8]>,
         strength: f32,
         progress_cb: Option<ProgressCallback>,
         cancel_flag: &AtomicBool,
@@ -287,6 +288,15 @@ impl SdCppContext {
             };
 
             if input_image.is_some() {
+                // If a mask was provided, decode and resize it to match the aligned dimensions
+                if let Some(mask_bytes) = mask_image {
+                    let mask_img = image::load_from_memory(mask_bytes).map_err(|e| SdError::InvalidParams {
+                        reason: format!("Failed to decode mask image: {}", e),
+                    })?;
+                    let resized_mask = mask_img.resize_exact(img2img_width, img2img_height, image::imageops::FilterType::Nearest);
+                    mask_data = resized_mask.to_luma8().into_raw();
+                }
+
                 gen_params.init_image = init_image;
                 gen_params.strength = strength;
                 // mask_image must have matching dimensions — sd.cpp asserts width/height/channel

@@ -15,6 +15,7 @@ pub enum InferenceCommand {
     },
     Img2Img {
         input_image: Vec<u8>,
+        mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
         progress_cb: Option<ProgressCallback>,
         result_tx: mpsc::Sender<Result<GeneratedImage, SdError>>,
@@ -92,17 +93,19 @@ impl SdContext {
                             let result = cpp_ctx.generate(
                                 &params,
                                 None,   // no input image for txt2img
+                                None,   // no mask for txt2img
                                 0.0,    // strength unused for txt2img
                                 progress_cb,
                                 &thread_cancel,
                             );
                             let _ = result_tx.send(result);
                         }
-                        InferenceCommand::Img2Img { input_image, params, progress_cb, result_tx } => {
+                        InferenceCommand::Img2Img { input_image, mask_image, params, progress_cb, result_tx } => {
                             thread_cancel.store(false, Ordering::SeqCst);
                             let result = cpp_ctx.generate(
                                 &params.base,
                                 Some(&input_image),
+                                mask_image.as_deref(),
                                 params.strength,
                                 progress_cb,
                                 &thread_cancel,
@@ -176,12 +179,13 @@ impl SdContext {
     pub fn img2img(
         &self,
         input_image: Vec<u8>,
+        mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
         progress_cb: Option<ProgressCallback>,
     ) -> Result<GeneratedImage, SdError> {
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
-            .send(InferenceCommand::Img2Img { input_image, params, progress_cb, result_tx })
+            .send(InferenceCommand::Img2Img { input_image, mask_image, params, progress_cb, result_tx })
             .map_err(|_| SdError::ContextCreationFailed {
                 reason: "Inference thread has stopped".into(),
             })?;

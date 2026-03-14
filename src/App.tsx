@@ -20,7 +20,7 @@ import {
 import { getDefaultsForModel } from "./lib/defaults";
 
 import PromptBar from "./components/PromptBar";
-import ImageCanvas from "./components/ImageCanvas";
+import ImageCanvas, { ImageCanvasAPI } from "./components/ImageCanvas";
 import ProgressBar from "./components/ProgressBar";
 import SettingsPanel from "./components/SettingsPanel";
 import ModelSelector from "./components/ModelSelector";
@@ -76,6 +76,9 @@ const App: Component = () => {
   // Track last generation params for gallery save
   let lastPrompt = "";
   let lastNegativePrompt = "";
+
+  // ImageCanvas API ref for mask access
+  let imageCanvasApi: ImageCanvasAPI | undefined;
 
   const mode = () => (inputImage() ? "img2img" : "txt2img");
 
@@ -136,10 +139,13 @@ const App: Component = () => {
       listen<{ image_base64: string; width: number; height: number; seed: number; generation_time_secs: number }>("generation:complete", async (event) => {
         setGenerating(false);
         setGeneratedImage(event.payload.image_base64);
+        setInputImage(null); // Clear input so generated result displays
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
         setErrorMessage(null);
+        // Clear inpaint mask after generation
+        imageCanvasApi?.clearMask();
 
         // Auto-save to gallery
         const model = activeModel();
@@ -232,6 +238,13 @@ const App: Component = () => {
         inputBytes = Array.from(binary, (c) => c.charCodeAt(0));
       }
 
+      // Get mask bytes if a mask was drawn
+      let maskBytes: number[] | undefined;
+      if (inputBytes) {
+        const mask = imageCanvasApi?.getMask();
+        if (mask) maskBytes = mask;
+      }
+
       await generateImage({
         prompt,
         negative_prompt: negativePrompt || undefined,
@@ -242,6 +255,7 @@ const App: Component = () => {
         seed: seed(),
         sampler: sampler(),
         input_image: inputBytes,
+        mask_image: maskBytes,
         strength: inputBytes ? strength() : undefined,
       });
     } catch (err) {
@@ -444,6 +458,7 @@ const App: Component = () => {
           onImageDrop={handleImageDrop}
           onClearImage={handleClearImage}
           inputImage={inputImage()}
+          ref={(api) => { imageCanvasApi = api; }}
         />
 
         <ProgressBar

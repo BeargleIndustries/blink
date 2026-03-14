@@ -16,6 +16,7 @@ pub struct GenerationRequest {
     pub seed: Option<i64>,
     pub sampler: Option<String>,
     pub input_image: Option<Vec<u8>>,
+    pub mask_image: Option<Vec<u8>>,
     pub strength: Option<f32>,
 }
 
@@ -89,6 +90,7 @@ pub async fn generate_image(
 
     let is_img2img = request.input_image.is_some();
     let input_image = request.input_image;
+    let mask_image = request.mask_image;
     let strength = request.strength.unwrap_or(0.75);
     let seed = params.seed;
 
@@ -121,7 +123,7 @@ pub async fn generate_image(
                 base: params.clone(),
                 strength,
             };
-            ctx.img2img(input_image.unwrap_or_default(), img_params, Some(progress_cb))
+            ctx.img2img(input_image.unwrap_or_default(), mask_image, img_params, Some(progress_cb))
         } else {
             ctx.txt2img(params.clone(), Some(progress_cb))
         }
