@@ -1,4 +1,4 @@
-import { Component, createSignal } from "solid-js";
+import { Component, createSignal, createEffect } from "solid-js";
 
 interface PromptBarProps {
   onGenerate: (prompt: string, negativePrompt: string) => void;
@@ -7,11 +7,29 @@ interface PromptBarProps {
   modelLoading: boolean;
   modelReady: boolean;
   mode: "txt2img" | "img2img";
+  onEnhance?: (prompt: string) => void;
+  enhancing?: boolean;
+  enhancedPrompt?: string | null;
+  enhancedNegativePrompt?: string | null;
 }
 
 const PromptBar: Component<PromptBarProps> = (props) => {
   const [prompt, setPrompt] = createSignal("");
   const [negativePrompt, setNegativePrompt] = createSignal("");
+
+  createEffect(() => {
+    const enhanced = props.enhancedPrompt;
+    if (enhanced) {
+      setPrompt(enhanced);
+    }
+  });
+
+  createEffect(() => {
+    const enhanced = props.enhancedNegativePrompt;
+    if (enhanced) {
+      setNegativePrompt(enhanced);
+    }
+  });
 
   const canGenerate = () => props.modelReady && !props.generating && !props.modelLoading && prompt().trim().length > 0;
 
@@ -36,27 +54,50 @@ const PromptBar: Component<PromptBarProps> = (props) => {
       "flex-direction": "column",
       gap: "8px",
     }}>
-      <textarea
-        placeholder="Enter your prompt..."
-        rows={3}
-        value={prompt()}
-        onInput={(e) => setPrompt(e.currentTarget.value)}
-        onKeyDown={handleKeyDown}
-        disabled={props.generating}
-        style={{
-          width: "100%",
-          padding: "12px",
-          background: "var(--bg-secondary)",
-          border: "1px solid var(--border)",
-          "border-radius": "var(--radius)",
-          color: "var(--text-primary)",
-          resize: "vertical",
-          "font-size": "14px",
-          "font-family": "inherit",
-          outline: "none",
-          "box-sizing": "border-box",
-        }}
-      />
+      <div style={{ position: "relative", width: "100%" }}>
+        <textarea
+          placeholder="Enter your prompt..."
+          rows={3}
+          value={prompt()}
+          onInput={(e) => setPrompt(e.currentTarget.value)}
+          onKeyDown={handleKeyDown}
+          disabled={props.generating}
+          style={{
+            width: "100%",
+            padding: "12px",
+            "padding-right": "44px",
+            background: "var(--bg-secondary)",
+            border: "1px solid var(--border)",
+            "border-radius": "var(--radius)",
+            color: "var(--text-primary)",
+            resize: "vertical",
+            "font-size": "14px",
+            "font-family": "inherit",
+            outline: "none",
+            "box-sizing": "border-box",
+          }}
+        />
+        <button
+          onClick={() => props.onEnhance?.(prompt())}
+          disabled={props.enhancing || !prompt().trim()}
+          title="Enhance prompt with AI"
+          style={{
+            position: "absolute",
+            right: "8px",
+            top: "8px",
+            background: "none",
+            border: "none",
+            cursor: props.enhancing || !prompt().trim() ? "not-allowed" : "pointer",
+            opacity: props.enhancing || !prompt().trim() ? "0.4" : "0.7",
+            "font-size": "18px",
+            padding: "2px",
+            "line-height": "1",
+            transition: "opacity 0.15s",
+          }}
+        >
+          {props.enhancing ? "⏳" : "✨"}
+        </button>
+      </div>
       <input
         type="text"
         placeholder="Negative prompt (optional)"

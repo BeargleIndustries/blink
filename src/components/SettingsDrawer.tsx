@@ -28,6 +28,8 @@ interface SettingsDrawerProps {
   perfSettings: PerfSettings; onPerfChange: (v: PerfSettings) => void;
   // HF Token
   hfToken: string | null; onHfTokenChange: (v: string | null) => void;
+  // Anthropic API Key
+  anthropicKey: string | null; onAnthropicKeyChange: (v: string | null) => void;
 }
 
 const inputStyle = {
@@ -425,6 +427,33 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
           />
           <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
             huggingface.co/settings/tokens
+          </div>
+
+          <div style={{ "font-size": "12px", color: "var(--text-secondary)", "font-weight": "600", "margin-bottom": "4px", "margin-top": "16px" }}>
+            Anthropic API Key
+          </div>
+          <div style={{ "font-size": "11px", color: "var(--text-secondary)", "margin-bottom": "8px", opacity: "0.6" }}>
+            Required for prompt enhancement (✨)
+          </div>
+          <input
+            type="password"
+            placeholder="sk-ant-..."
+            value={props.anthropicKey ?? ""}
+            onInput={(e) => props.onAnthropicKeyChange(e.currentTarget.value || null)}
+            style={{
+              width: "100%",
+              padding: "6px 10px",
+              background: "var(--bg-secondary)",
+              border: "1px solid var(--border)",
+              "border-radius": "4px",
+              color: "var(--text-primary)",
+              "font-size": "13px",
+              outline: "none",
+              "box-sizing": "border-box",
+            }}
+          />
+          <div style={{ "font-size": "11px", color: "var(--text-muted)", "margin-top": "6px" }}>
+            console.anthropic.com/settings/keys
           </div>
         </div>
 

@@ -80,3 +80,20 @@ pub async fn set_hf_token(state: State<'_, AppState>, token: Option<String>) -> 
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn get_anthropic_key(state: State<'_, AppState>) -> Result<Option<String>, String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    match store.get("anthropic_key") {
+        Some(val) => serde_json::from_value(val).map_err(|e| e.to_string()),
+        None => Ok(None),
+    }
+}
+
+#[tauri::command]
+pub async fn set_anthropic_key(state: State<'_, AppState>, key: Option<String>) -> Result<(), String> {
+    let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
+    store.set("anthropic_key", serde_json::to_value(&key).map_err(|e| e.to_string())?);
+    store.save().map_err(|e| e.to_string())?;
+    Ok(())
+}

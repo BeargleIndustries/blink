@@ -150,3 +150,15 @@ export async function generateVideo(request: VideoRequest): Promise<string> {
 export async function scanLoraDirectory(path: string): Promise<LoraFileInfo[]> {
   return invoke("scan_lora_directory", { path });
 }
+
+export async function enhancePrompt(prompt: string, apiKey: string): Promise<{ prompt: string; negative_prompt: string }> {
+  return invoke("enhance_prompt", { prompt, apiKey });
+}
+
+export async function getAnthropicKey(): Promise<string | null> {
+  return invoke("get_anthropic_key");
+}
+
+export async function setAnthropicKey(key: string | null): Promise<void> {
+  return invoke("set_anthropic_key", { key });
+}

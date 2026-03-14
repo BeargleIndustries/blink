@@ -234,6 +234,101 @@ pub async fn cancel_generation(
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContentBlock>,
+}
+
+#[derive(serde::Deserialize)]
+struct AnthropicContentBlock {
+    text: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct EnhancedPrompt {
+    pub prompt: String,
+    pub negative_prompt: String,
+}
+
+#[tauri::command]
+pub async fn enhance_prompt(prompt: String, api_key: String) -> Result<EnhancedPrompt, String> {
+    let client = reqwest::Client::new();
+
+    let system_prompt = r#"You are an expert AI image generation prompt engineer. Enhance the user's simple prompt into a detailed, professional image generation prompt, and generate an appropriate negative prompt.
+
+Positive prompt rules:
+- Keep the core subject/intent of the original prompt
+- Add specific visual details: materials, textures, colors, lighting
+- Add composition details: camera angle, lens type, depth of field
+- Add mood/atmosphere: time of day, weather, emotional tone
+- Add style keywords: photorealistic, cinematic, detailed, sharp focus
+- Add technical quality boosters: 8k, high resolution, detailed textures
+- Keep it under 200 words
+- Match the style to the content (photorealistic for photos, artistic terms for art, etc.)
+
+Negative prompt rules:
+- Include common quality issues to avoid: blurry, low quality, distorted, deformed
+- Add content-appropriate exclusions (e.g., for portraits: extra limbs, bad anatomy, bad hands)
+- Keep it concise — 10-30 words max
+
+Output format — use EXACTLY this format:
+PROMPT: [enhanced prompt]
+NEGATIVE: [negative prompt]
+
+Output ONLY these two lines. No explanation, no quotes, no other text."#;
+
+    let response = client
+        .post("https://api.anthropic.com/v1/messages")
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&serde_json::json!({
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 400,
+            "system": system_prompt,
+            "messages": [{
+                "role": "user",
+                "content": format!("Enhance this image generation prompt:\n\n{}", prompt)
+            }]
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("API request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("API error {}: {}", status, body));
+    }
+
+    let result: AnthropicResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+    let text = result.content
+        .first()
+        .and_then(|block| block.text.clone())
+        .ok_or_else(|| "No text in response".to_string())?;
+
+    let mut enhanced_prompt = text.clone();
+    let mut negative_prompt = String::new();
+
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(p) = line.strip_prefix("PROMPT:") {
+            enhanced_prompt = p.trim().to_string();
+        } else if let Some(n) = line.strip_prefix("NEGATIVE:") {
+            negative_prompt = n.trim().to_string();
+        }
+    }
+
+    Ok(EnhancedPrompt {
+        prompt: enhanced_prompt,
+        negative_prompt,
+    })
+}
+
 fn encode_image_to_png(rgba_data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, RgbaImage};
     let img: RgbaImage = ImageBuffer::from_raw(width, height, rgba_data.to_vec())

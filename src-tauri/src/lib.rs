@@ -26,6 +26,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::generation::generate_image,
             commands::generation::cancel_generation,
+            commands::generation::enhance_prompt,
             commands::models::get_models,
             commands::models::get_downloaded_models,
             commands::models::download_model,
@@ -37,6 +38,8 @@ pub fn run() {
             commands::settings::save_settings,
             commands::settings::get_hf_token,
             commands::settings::set_hf_token,
+            commands::settings::get_anthropic_key,
+            commands::settings::set_anthropic_key,
             commands::settings::get_perf_settings,
             commands::settings::save_perf_settings,
             commands::system::get_system_info,

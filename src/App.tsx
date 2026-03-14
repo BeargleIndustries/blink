@@ -16,6 +16,9 @@ import {
   savePerfSettings,
   getHfToken,
   setHfToken,
+  getAnthropicKey,
+  setAnthropicKey,
+  enhancePrompt,
 } from "./lib/tauri-api";
 import { getDefaultsForModel } from "./lib/defaults";
 
@@ -55,6 +58,10 @@ const App: Component = () => {
   const [downloading, setDownloading] = createSignal<string | null>(null);
   const [downloadProgress, setDownloadProgress] = createSignal<{ modelId: string; fileRole: string; fileIndex: number; totalFiles: number } | null>(null);
   const [hfToken, setHfTokenState] = createSignal<string | null>(null);
+  const [anthropicKey, setAnthropicKeyState] = createSignal<string | null>(null);
+  const [enhancing, setEnhancing] = createSignal(false);
+  const [enhancedPrompt, setEnhancedPrompt] = createSignal<string | null>(null);
+  const [enhancedNegativePrompt, setEnhancedNegativePrompt] = createSignal<string | null>(null);
 
   const [perfSettings, setPerfSettings] = createSignal<PerfSettings>({
     flash_attn: true,
@@ -127,12 +134,13 @@ const App: Component = () => {
 
   onMount(async () => {
     try {
-      const [loadedModels, sysInfo, gallery, perf, token] = await Promise.all([
+      const [loadedModels, sysInfo, gallery, perf, token, anthropicKeyVal] = await Promise.all([
         getModels(),
         getSystemInfo(),
         getGallery(),
         getPerfSettings(),
         getHfToken(),
+        getAnthropicKey(),
       ]);
 
       setModels(loadedModels);
@@ -140,6 +148,7 @@ const App: Component = () => {
       setGalleryItems(gallery);
       setPerfSettings(perf);
       setHfTokenState(token);
+      setAnthropicKeyState(anthropicKeyVal);
 
       const active = loadedModels.find((m) => m.active);
       if (active) {
@@ -395,6 +404,37 @@ const App: Component = () => {
     }
   };
 
+  const handleAnthropicKeyChange = async (key: string | null) => {
+    setAnthropicKeyState(key);
+    try {
+      await setAnthropicKey(key);
+    } catch (err) {
+      console.error("Failed to save Anthropic key:", err);
+    }
+  };
+
+  const handleEnhance = async (prompt: string) => {
+    const key = anthropicKey();
+    if (!key) {
+      setErrorMessage("Set your Anthropic API key in Settings to use prompt enhancement");
+      setTimeout(() => setErrorMessage(null), 5000);
+      return;
+    }
+    if (!prompt.trim()) return;
+    setEnhancing(true);
+    try {
+      const result = await enhancePrompt(prompt, key);
+      setEnhancedPrompt(result.prompt);
+      setEnhancedNegativePrompt(result.negative_prompt || null);
+      setTimeout(() => { setEnhancedPrompt(null); setEnhancedNegativePrompt(null); }, 100);
+    } catch (err) {
+      setErrorMessage(`Enhance failed: ${err}`);
+      setTimeout(() => setErrorMessage(null), 5000);
+    } finally {
+      setEnhancing(false);
+    }
+  };
+
   const handlePerfChange = async (settings: PerfSettings) => {
     setPerfSettings(settings);
     try {
@@ -603,6 +643,10 @@ const App: Component = () => {
           modelLoading={modelLoading()}
           modelReady={!!activeModelId() && !modelLoading()}
           mode={(mode() === "edit" ? "img2img" : mode()) as "txt2img" | "img2img"}
+          onEnhance={handleEnhance}
+          enhancing={enhancing()}
+          enhancedPrompt={enhancedPrompt()}
+          enhancedNegativePrompt={enhancedNegativePrompt()}
         />
 
       </main>
@@ -641,6 +685,7 @@ const App: Component = () => {
         loras={loras()} onLorasChange={setLoras}
         perfSettings={perfSettings()} onPerfChange={handlePerfChange}
         hfToken={hfToken()} onHfTokenChange={handleHfTokenChange}
+        anthropicKey={anthropicKey()} onAnthropicKeyChange={handleAnthropicKeyChange}
       />
 
       <Show when={showWizard()}>
