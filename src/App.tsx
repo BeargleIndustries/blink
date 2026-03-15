@@ -129,8 +129,10 @@ const App: Component = () => {
 
   const activeModel = () => models().find((m) => m.active) ?? null;
 
-  const applyModelDefaults = (modelId: string) => {
-    const defaults = getDefaultsForModel(modelId);
+  const applyModelDefaults = (modelId: string, modelList?: ModelInfo[]) => {
+    const list = modelList ?? models();
+    const info = list.find((m) => m.id === modelId);
+    const defaults = getDefaultsForModel(modelId, info);
     setSteps(defaults.steps);
     setCfgScale(defaults.cfg_scale);
     setWidth(defaults.width);
@@ -169,7 +171,7 @@ const App: Component = () => {
       const active = loadedModels.find((m) => m.active);
       if (active) {
         setActiveModelId(active.id);
-        applyModelDefaults(active.id);
+        applyModelDefaults(active.id, loadedModels);
       }
 
       const hasDownloaded = loadedModels.some((m) => m.downloaded);
@@ -357,7 +359,7 @@ const App: Component = () => {
       const updated = await getModels();
       setModels(updated);
       setActiveModelId(modelId);
-      applyModelDefaults(modelId);
+      applyModelDefaults(modelId, updated);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setErrorMessage(`Failed to load model: ${msg}`);

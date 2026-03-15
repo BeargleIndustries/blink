@@ -22,6 +22,7 @@
         "commercial": true
       },
       "tier": 1,
+      "available": true,
       "recommended_for": ["low_vram", "beginners"]
     },
     {
@@ -45,6 +46,7 @@
         "commercial": true
       },
       "tier": 1,
+      "available": true,
       "recommended_for": ["quality"]
     },
     {
@@ -103,6 +105,7 @@
       "id": "sd15-q8",
       "name": "Stable Diffusion 1.5 (Q8)",
       "description": "Higher quality SD 1.5 variant. Slower but better detail.",
+      "available": true,
       "repo": "second-state/stable-diffusion-v1-5-GGUF",
       "filename": "stable-diffusion-v1-5-pruned-emaonly-Q8_0.gguf",
       "sha256": "pending-verification",
@@ -125,7 +128,8 @@
     {
       "id": "flux-dev-q4",
       "name": "Flux.1 Dev",
-      "description": "Higher quality Flux variant. More steps needed (20-50) but better results.",
+      "description": "Higher quality Flux variant. Best at recognizing named people/celebrities. 20-50 steps.",
+      "available": true,
       "sha256": "pending-verification",
       "size_bytes": 10080000000,
       "vram_mb": 12000,

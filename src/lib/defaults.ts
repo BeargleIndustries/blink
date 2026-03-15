@@ -63,8 +63,34 @@ export const MODEL_DEFAULTS: Record<string, ModelDefaults> = {
     cfg_scale: 1.0,
     sampler: "euler",
   },
+  "flux-kontext-dev-q4": {
+    width: 1024,
+    height: 1024,
+    steps: 35,
+    cfg_scale: 3.5,
+    sampler: "euler",
+  },
+  "flux-kontext-dev-q8": {
+    width: 1024,
+    height: 1024,
+    steps: 35,
+    cfg_scale: 3.5,
+    sampler: "euler",
+  },
 };
 
-export function getDefaultsForModel(modelId: string): ModelDefaults {
-  return MODEL_DEFAULTS[modelId] ?? MODEL_DEFAULTS["sd15-q5"];
+export function getDefaultsForModel(modelId: string, modelInfo?: { default_width: number; default_height: number; default_steps: number; default_cfg: number; default_sampler: string }): ModelDefaults {
+  if (MODEL_DEFAULTS[modelId]) {
+    return MODEL_DEFAULTS[modelId];
+  }
+  if (modelInfo) {
+    return {
+      width: modelInfo.default_width,
+      height: modelInfo.default_height,
+      steps: modelInfo.default_steps,
+      cfg_scale: modelInfo.default_cfg,
+      sampler: modelInfo.default_sampler,
+    };
+  }
+  return MODEL_DEFAULTS["sd15-q5"];
 }

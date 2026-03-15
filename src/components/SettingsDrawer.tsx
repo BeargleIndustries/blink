@@ -102,10 +102,34 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
     }
   };
 
+  // Auto-detect local LLM server when provider switches to "local"
+  const autoDetectEndpoint = async () => {
+    const defaults = ["http://localhost:11434", "http://localhost:1234"];
+    for (const ep of defaults) {
+      try {
+        const models = await listLocalLlmModels(ep);
+        if (models.length > 0) {
+          props.onLocalLlmEndpointChange(ep);
+          setAvailableModels(models);
+          if (!props.localLlmModel) {
+            props.onLocalLlmModelChange(models[0].name);
+          }
+          return;
+        }
+      } catch {
+        // not available, try next
+      }
+    }
+  };
+
   // Fetch models when endpoint changes or when local provider is selected
   createEffect(() => {
-    if (props.enhanceProvider === "local" && props.localLlmEndpoint) {
-      fetchModels(props.localLlmEndpoint);
+    if (props.enhanceProvider === "local") {
+      if (props.localLlmEndpoint) {
+        fetchModels(props.localLlmEndpoint);
+      } else {
+        autoDetectEndpoint();
+      }
     }
   });
 

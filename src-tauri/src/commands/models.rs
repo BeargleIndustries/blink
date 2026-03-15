@@ -3,7 +3,8 @@ use tauri::{State, Emitter};
 use tauri_plugin_store::StoreExt;
 use crate::state::{AppState, ModelPaths, PerfSettings};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::ffi::OsStr;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ModelManifest {
@@ -116,6 +117,10 @@ struct ModelStatus {
     sha256_verified: bool,
     #[serde(default)]
     files: Option<HashMap<String, FileStatus>>,
+    #[serde(default)]
+    architecture: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -192,15 +197,20 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
         if id.starts_with("custom-") && status.status == "ready" {
             let full_path = PathBuf::from(&model_dir).join(&status.path);
             let size_bytes = std::fs::metadata(&full_path).map(|m| m.len()).unwrap_or(status.size_bytes);
-            let filename = full_path.file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-                .unwrap_or_else(|| id.clone());
+            let display_name = status.name.clone()
+                .unwrap_or_else(|| {
+                    full_path.file_name()
+                        .map(|f| f.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| id.clone())
+                });
             let is_active = active.as_ref() == Some(id);
+            let arch = status.architecture.clone().unwrap_or_else(|| "custom".to_string());
+            let (def_w, def_h, def_steps, def_cfg, def_sampler) = architecture_defaults(&arch);
             models.push(ModelInfo {
                 id: id.clone(),
-                name: filename,
+                name: display_name,
                 description: "Custom imported model".to_string(),
-                architecture: "custom".to_string(),
+                architecture: arch,
                 size_bytes,
                 vram_mb: 0,
                 license_name: "Unknown".to_string(),
@@ -208,11 +218,11 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
                 commercial: false,
                 downloaded: true,
                 active: is_active,
-                default_width: 512,
-                default_height: 512,
-                default_steps: 20,
-                default_cfg: 7.0,
-                default_sampler: "euler_a".to_string(),
+                default_width: def_w,
+                default_height: def_h,
+                default_steps: def_steps,
+                default_cfg: def_cfg,
+                default_sampler: def_sampler,
             });
         }
     }
@@ -342,6 +352,8 @@ pub async fn download_model(
                                 size_bytes: model.size_bytes,
                                 sha256_verified: false,
                                 files: Some(file_statuses.clone()),
+                                architecture: None,
+                                name: None,
                             });
                             let _ = save_metadata(&model_dir, &metadata);
                             continue;
@@ -385,6 +397,8 @@ pub async fn download_model(
                             size_bytes: model.size_bytes,
                             sha256_verified: false,
                             files: Some(file_statuses.clone()),
+                            architecture: None,
+                            name: None,
                         });
                         let _ = save_metadata(&model_dir, &metadata);
                         continue;
@@ -401,6 +415,8 @@ pub async fn download_model(
                 size_bytes: model.size_bytes,
                 sha256_verified: false,
                 files: Some(file_statuses),
+                architecture: None,
+                name: None,
             });
             let _ = save_metadata(&model_dir, &metadata);
 
@@ -453,6 +469,8 @@ pub async fn download_model(
                         size_bytes: model.size_bytes,
                         sha256_verified: false,
                         files: None,
+                        architecture: None,
+                        name: None,
                     });
                     let _ = save_metadata(&model_dir, &metadata);
 
@@ -506,6 +524,11 @@ pub async fn delete_model(
                     let _ = std::fs::remove_file(&file_path);
                 }
             }
+            // For custom multi-file models, also clean up the model subdirectory
+            let model_path = PathBuf::from(&model_dir).join(&model_status.path);
+            if model_path.is_dir() {
+                let _ = std::fs::remove_dir(&model_path);
+            }
             // Try to remove the architecture directory if now empty
             if let Some(parent) = PathBuf::from(&model_dir).join(&model_status.path).parent() {
                 let _ = std::fs::remove_dir(parent); // only succeeds if empty
@@ -542,26 +565,77 @@ pub async fn set_active_model(
         .and_then(|val| serde_json::from_value::<PerfSettings>(val).ok())
         .unwrap_or_default();
 
-    // Custom models: single-file, no manifest entry needed
+    // Custom models: single-file or multi-file, no manifest entry needed
     if model_id.starts_with("custom-") {
-        let model_path = PathBuf::from(&model_dir).join(&model_status.path);
-        if !model_path.exists() {
-            return Err(format!("Model file not found: {}", model_path.display()));
+        if let Some(ref file_statuses) = model_status.files {
+            // Multi-file custom model — resolve paths like manifest models
+            let model_subdir = PathBuf::from(&model_dir).join(&model_status.path);
+            let path_for_role = |role: &str| -> Option<String> {
+                file_statuses.get(role).map(|fs| {
+                    let full = model_subdir.join(&fs.path);
+                    full.to_string_lossy().into_owned()
+                })
+            };
+
+            let paths = ModelPaths {
+                model_path: None,
+                diffusion_model_path: path_for_role("diffusion_model"),
+                clip_l_path: path_for_role("clip_l"),
+                t5xxl_path: path_for_role("t5xxl"),
+                vae_path: path_for_role("vae"),
+                llm_path: path_for_role("llm"),
+                control_net_path: None,
+                taesd_path: None,
+            };
+
+            // Perf auto-adjustment for multi-file custom models
+            if let Some(ref arch) = model_status.architecture {
+                match arch.as_str() {
+                    "flux" | "flux-kontext" | "z-image" => {
+                        perf.offload_params_to_cpu = true;
+                        eprintln!("[blink] Auto-enabled offload-to-cpu for custom {} model", arch);
+                    }
+                    _ => {}
+                }
+            }
+
+            state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
+            let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
+            *active = Some(model_id);
+            return Ok(());
+        } else {
+            // Legacy single-file custom model — existing behavior
+            let model_path = PathBuf::from(&model_dir).join(&model_status.path);
+            if !model_path.exists() {
+                return Err(format!("Model file not found: {}", model_path.display()));
+            }
+            let paths = ModelPaths {
+                model_path: Some(model_path.to_string_lossy().into_owned()),
+                vae_path: None,
+                clip_l_path: None,
+                t5xxl_path: None,
+                diffusion_model_path: None,
+                llm_path: None,
+                control_net_path: None,
+                taesd_path: None,
+            };
+
+            // Perf auto-adjustment for single-file custom models with known architecture
+            if let Some(ref arch) = model_status.architecture {
+                match arch.as_str() {
+                    "flux" | "flux-kontext" | "z-image" => {
+                        perf.offload_params_to_cpu = true;
+                        eprintln!("[blink] Auto-enabled offload-to-cpu for custom {} model", arch);
+                    }
+                    _ => {}
+                }
+            }
+
+            state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
+            let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
+            *active = Some(model_id);
+            return Ok(());
         }
-        let paths = ModelPaths {
-            model_path: Some(model_path.to_string_lossy().into_owned()),
-            vae_path: None,
-            clip_l_path: None,
-            t5xxl_path: None,
-            diffusion_model_path: None,
-            llm_path: None,
-            control_net_path: None,
-            taesd_path: None,
-        };
-        state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
-        let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
-        *active = Some(model_id);
-        return Ok(());
     }
 
     let manifest = load_manifest()?;
@@ -629,7 +703,7 @@ pub async fn set_active_model(
 
     let arch = &manifest_model.architecture;
     match arch.as_str() {
-        "flux" | "z-image" => {
+        "flux" | "flux-kontext" | "z-image" => {
             // Large models that may exceed VRAM. Enable offload to swap weights
             // through CPU RAM while keeping compute on GPU.
             perf.offload_params_to_cpu = true;
@@ -679,7 +753,19 @@ pub async fn import_custom_model(
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis()
     });
-    let display_name = name.unwrap_or_else(|| safe_filename.clone());
+
+    // Derive display name: use provided name, or strip extension from filename
+    let display_name = name.unwrap_or_else(|| {
+        safe_filename
+            .strip_suffix(".gguf")
+            .or_else(|| safe_filename.strip_suffix(".safetensors"))
+            .unwrap_or(&safe_filename)
+            .to_string()
+    });
+
+    let architecture = detect_architecture(&filename, &repo);
+    let companions = get_companion_files(&architecture);
+
     let model_dir = state.model_dir.lock().map_err(|e| e.to_string())?.clone();
     let app_handle = state.app_handle.clone();
 
@@ -691,14 +777,6 @@ pub async fn import_custom_model(
         .flatten();
 
     std::thread::spawn(move || {
-        let target_dir = PathBuf::from(&model_dir).join("custom");
-        if let Err(e) = std::fs::create_dir_all(&target_dir) {
-            log::error!("Failed to create custom model dir: {}", e);
-            let _ = app_handle.emit("model:download_error",
-                format!("{}: failed to create directory: {}", model_id, e));
-            return;
-        }
-
         let api_builder = hf_hub::api::sync::ApiBuilder::new();
         let api = if let Some(ref token) = hf_token {
             api_builder.with_token(Some(token.clone())).build()
@@ -715,40 +793,161 @@ pub async fn import_custom_model(
             }
         };
 
-        log::info!("Importing custom model: {} from {}/{}", display_name, repo, filename);
-        let hf_repo = api.model(repo.clone());
-        match hf_repo.get(&filename) {
-            Ok(cached_path) => {
-                let target_path = target_dir.join(&safe_filename);
-                if let Err(e) = std::fs::copy(&cached_path, &target_path) {
-                    log::error!("Failed to copy custom model: {}", e);
+        if !companions.is_empty() {
+            // Multi-file download: create subdirectory
+            let target_dir = PathBuf::from(&model_dir).join("custom").join(&model_id);
+            if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                log::error!("Failed to create custom model dir: {}", e);
+                let _ = app_handle.emit("model:download_error",
+                    format!("{}: failed to create directory: {}", model_id, e));
+                return;
+            }
+
+            let total_files = 1 + companions.len();
+            let mut file_statuses: HashMap<String, FileStatus> = HashMap::new();
+
+            // Download primary file as "diffusion_model" role
+            let _ = app_handle.emit("model:download_file_start",
+                format!("{}: downloading diffusion_model (1/{})", model_id, total_files));
+
+            log::info!("Importing custom model: {} from {}/{}", display_name, repo, filename);
+            let hf_repo = api.model(repo.clone());
+            match hf_repo.get(&filename) {
+                Ok(cached_path) => {
+                    let target_path = target_dir.join(&safe_filename);
+                    if let Err(e) = std::fs::copy(&cached_path, &target_path) {
+                        log::error!("Failed to copy custom model: {}", e);
+                        let _ = app_handle.emit("model:download_error",
+                            format!("{}: copy failed: {}", model_id, e));
+                        return;
+                    }
+                    file_statuses.insert("diffusion_model".into(), FileStatus {
+                        path: safe_filename.clone(),
+                        status: "ready".into(),
+                    });
+                    let _ = app_handle.emit("model:download_file_complete", serde_json::json!({
+                        "model_id": model_id,
+                        "file_role": "diffusion_model",
+                    }));
+                }
+                Err(e) => {
+                    log::error!("Custom model download failed: {}", e);
                     let _ = app_handle.emit("model:download_error",
-                        format!("{}: copy failed: {}", model_id, e));
+                        format!("{}: {}", model_id, e));
                     return;
                 }
-
-                let size_bytes = std::fs::metadata(&target_path).map(|m| m.len()).unwrap_or(0);
-
-                let mut metadata = load_metadata(&model_dir);
-                metadata.models.insert(model_id.clone(), ModelStatus {
-                    status: "ready".into(),
-                    path: format!("custom/{}", safe_filename),
-                    downloaded_at: Some(unix_timestamp()),
-                    size_bytes,
-                    sha256_verified: false,
-                    files: None,
-                });
-                if let Err(e) = save_metadata(&model_dir, &metadata) {
-                    log::error!("Failed to save metadata for custom model: {}", e);
-                }
-
-                let _ = app_handle.emit("model:download_complete", &model_id);
-                log::info!("Custom model import complete: {}", display_name);
             }
-            Err(e) => {
-                log::error!("Custom model download failed: {}", e);
+
+            // Download companion files
+            for (i, companion) in companions.iter().enumerate() {
+                let file_index = i + 2; // 1-indexed, primary was 1
+                let _ = app_handle.emit("model:download_file_start",
+                    format!("{}: downloading {} ({}/{})", model_id, companion.role, file_index, total_files));
+
+                let companion_repo = api.model(companion.repo.clone());
+                match companion_repo.get(&companion.filename) {
+                    Ok(cached_path) => {
+                        let target_filename = Path::new(&companion.filename)
+                            .file_name()
+                            .unwrap_or(OsStr::new(&companion.filename))
+                            .to_string_lossy().to_string();
+                        let target = target_dir.join(&target_filename);
+                        if let Err(e) = std::fs::copy(&cached_path, &target) {
+                            log::error!("Failed to copy companion file {}: {}", companion.role, e);
+                            let _ = app_handle.emit("model:download_error",
+                                format!("{}: copy failed for {}: {}", model_id, companion.role, e));
+                            return;
+                        }
+                        file_statuses.insert(companion.role.clone(), FileStatus {
+                            path: target_filename,
+                            status: "ready".into(),
+                        });
+                        let _ = app_handle.emit("model:download_file_complete", serde_json::json!({
+                            "model_id": model_id,
+                            "file_role": companion.role,
+                        }));
+                    }
+                    Err(e) => {
+                        log::error!("Companion download failed for {}: {}", companion.role, e);
+                        let _ = app_handle.emit("model:download_error",
+                            format!("{}: download failed for {}: {}", model_id, companion.role, e));
+                        return;
+                    }
+                }
+            }
+
+            // All files downloaded — save metadata
+            let total_size: u64 = file_statuses.values()
+                .filter_map(|fs| {
+                    let full_path = target_dir.join(&fs.path);
+                    std::fs::metadata(&full_path).ok().map(|m| m.len())
+                })
+                .sum();
+
+            let mut metadata = load_metadata(&model_dir);
+            metadata.models.insert(model_id.clone(), ModelStatus {
+                status: "ready".into(),
+                path: format!("custom/{}/", model_id),
+                downloaded_at: Some(unix_timestamp()),
+                size_bytes: total_size,
+                sha256_verified: false,
+                files: Some(file_statuses),
+                architecture: Some(architecture),
+                name: Some(display_name.clone()),
+            });
+            if let Err(e) = save_metadata(&model_dir, &metadata) {
+                log::error!("Failed to save metadata for custom model: {}", e);
+            }
+
+            let _ = app_handle.emit("model:download_complete", &model_id);
+            log::info!("Custom model import complete (multi-file): {}", display_name);
+        } else {
+            // Single-file download (sd1, sdxl): flat custom/ directory
+            let target_dir = PathBuf::from(&model_dir).join("custom");
+            if let Err(e) = std::fs::create_dir_all(&target_dir) {
+                log::error!("Failed to create custom model dir: {}", e);
                 let _ = app_handle.emit("model:download_error",
-                    format!("{}: {}", model_id, e));
+                    format!("{}: failed to create directory: {}", model_id, e));
+                return;
+            }
+
+            log::info!("Importing custom model: {} from {}/{}", display_name, repo, filename);
+            let hf_repo = api.model(repo.clone());
+            match hf_repo.get(&filename) {
+                Ok(cached_path) => {
+                    let target_path = target_dir.join(&safe_filename);
+                    if let Err(e) = std::fs::copy(&cached_path, &target_path) {
+                        log::error!("Failed to copy custom model: {}", e);
+                        let _ = app_handle.emit("model:download_error",
+                            format!("{}: copy failed: {}", model_id, e));
+                        return;
+                    }
+
+                    let size_bytes = std::fs::metadata(&target_path).map(|m| m.len()).unwrap_or(0);
+
+                    let mut metadata = load_metadata(&model_dir);
+                    metadata.models.insert(model_id.clone(), ModelStatus {
+                        status: "ready".into(),
+                        path: format!("custom/{}", safe_filename),
+                        downloaded_at: Some(unix_timestamp()),
+                        size_bytes,
+                        sha256_verified: false,
+                        files: None,
+                        architecture: Some(architecture),
+                        name: Some(display_name.clone()),
+                    });
+                    if let Err(e) = save_metadata(&model_dir, &metadata) {
+                        log::error!("Failed to save metadata for custom model: {}", e);
+                    }
+
+                    let _ = app_handle.emit("model:download_complete", &model_id);
+                    log::info!("Custom model import complete: {}", display_name);
+                }
+                Err(e) => {
+                    log::error!("Custom model download failed: {}", e);
+                    let _ = app_handle.emit("model:download_error",
+                        format!("{}: {}", model_id, e));
+                }
             }
         }
     });
@@ -780,6 +979,58 @@ fn parse_hf_url(url: &str) -> Result<(String, String), String> {
     }
 
     Err("Unrecognized URL format. Use:\n  https://huggingface.co/owner/repo/blob/main/model.gguf\n  owner/repo:model.gguf".to_string())
+}
+
+#[derive(Debug, Clone)]
+struct CompanionFile {
+    role: String,
+    repo: String,
+    filename: String,
+    size_bytes: u64,
+}
+
+fn detect_architecture(filename: &str, repo: &str) -> String {
+    let fname_lower = filename.to_lowercase();
+    let repo_lower = repo.to_lowercase();
+
+    // Order matters — check more specific patterns first
+    if fname_lower.contains("z-image") || fname_lower.contains("z_image")
+        || repo_lower.contains("z-image") || repo_lower.contains("z_image") {
+        "z-image".to_string()
+    } else if fname_lower.contains("kontext") || repo_lower.contains("kontext") {
+        "flux-kontext".to_string()
+    } else if fname_lower.contains("flux") || repo_lower.contains("flux") {
+        "flux".to_string()
+    } else if fname_lower.contains("wan") || repo_lower.contains("wan") {
+        "wan".to_string()
+    } else if fname_lower.contains("sdxl") || fname_lower.contains("sd_xl")
+        || repo_lower.contains("sdxl") || repo_lower.contains("sd_xl") {
+        "sdxl".to_string()
+    } else if fname_lower.contains("sd3") || repo_lower.contains("sd3") {
+        "sd3".to_string()
+    } else {
+        "sd1".to_string()
+    }
+}
+
+fn get_companion_files(architecture: &str) -> Vec<CompanionFile> {
+    match architecture {
+        "flux" | "flux-kontext" => vec![
+            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into(), size_bytes: 300_000_000 },
+            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into(), size_bytes: 2_500_000_000 },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into(), size_bytes: 200_000_000 },
+        ],
+        "z-image" => vec![
+            CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-4B-Instruct-2507-GGUF".into(), filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into(), size_bytes: 2_800_000_000 },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into(), size_bytes: 200_000_000 },
+        ],
+        "wan" => vec![
+            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into(), size_bytes: 300_000_000 },
+            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into(), size_bytes: 2_500_000_000 },
+            CompanionFile { role: "vae".into(), repo: "Wan-AI/Wan2.1-T2V-1.3B".into(), filename: "Wan2.1_VAE.pth".into(), size_bytes: 400_000_000 },
+        ],
+        _ => vec![], // sd1, sdxl, sd3 — single file, no companions
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -817,6 +1068,17 @@ pub async fn scan_lora_directory(path: String) -> Result<Vec<LoraFileInfo>, Stri
         }
     }
     Ok(results)
+}
+
+fn architecture_defaults(arch: &str) -> (u32, u32, u32, f32, String) {
+    match arch {
+        "flux" => (1024, 1024, 4, 1.0, "euler".into()),
+        "flux-kontext" => (1024, 1024, 25, 3.5, "euler".into()),
+        "z-image" => (512, 1024, 4, 1.0, "euler".into()),
+        "wan" => (832, 480, 30, 6.0, "euler".into()),
+        "sdxl" => (1024, 1024, 25, 7.0, "euler_a".into()),
+        _ => (512, 512, 20, 7.0, "euler_a".into()), // sd1 default
+    }
 }
 
 fn unix_timestamp() -> String {

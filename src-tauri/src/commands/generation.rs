@@ -367,6 +367,14 @@ async fn enhance_prompt_ollama_native(prompt: String, endpoint: String, model: S
 
 #[tauri::command]
 pub async fn enhance_prompt_local(prompt: String, endpoint: String, model: String) -> Result<EnhancedPrompt, String> {
+    // Try Ollama native API first (better errors, preferred by Ollama)
+    match enhance_prompt_ollama_native(prompt.clone(), endpoint.clone(), model.clone()).await {
+        Ok(result) => return Ok(result),
+        Err(e) if e.contains("request failed") => {} // Connection error, fall through to OpenAI-compat
+        Err(e) => return Err(e), // Real error (bad model, server error) — surface it
+    }
+
+    // Fallback: OpenAI-compatible endpoint (LM Studio, etc.)
     let client = reqwest::Client::new();
     let url = format!("{}/v1/chat/completions", endpoint.trim_end_matches('/'));
 
@@ -389,10 +397,6 @@ pub async fn enhance_prompt_local(prompt: String, endpoint: String, model: Strin
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
-        // If 404, try Ollama native format
-        if status.as_u16() == 404 {
-            return enhance_prompt_ollama_native(prompt, endpoint, model).await;
-        }
         return Err(format!("Local LLM error {}: {}", status, body));
     }
 
