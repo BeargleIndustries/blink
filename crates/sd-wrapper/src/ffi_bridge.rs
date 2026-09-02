@@ -143,7 +143,8 @@ impl SdCppContext {
                 params.taesd_path = taesd.as_ptr();
             }
             params.n_threads = config.n_threads;
-            params.vae_decode_only = false; // need encoder for img2img
+            // `vae_decode_only` was removed from the C API; sd.cpp now always keeps
+            // the encoder available, which is what img2img needs anyway.
             // SD_TYPE_COUNT = auto-detect quantization from model file
             params.wtype = sd_sys::sd_type_t_SD_TYPE_COUNT;
 
@@ -151,10 +152,20 @@ impl SdCppContext {
             params.flash_attn = config.flash_attn;
             params.diffusion_flash_attn = config.diffusion_flash_attn;
             params.enable_mmap = config.enable_mmap;
-            params.free_params_immediately = config.free_params_immediately;
-            params.keep_clip_on_cpu = config.keep_clip_on_cpu;
-            params.keep_vae_on_cpu = config.keep_vae_on_cpu;
-            params.offload_params_to_cpu = config.offload_params_to_cpu;
+
+            // CPU offload is now expressed as a `params_backend` assignment string
+            // rather than individual booleans. Keep the CString alive until after
+            // new_sd_ctx() returns — sd.cpp borrows the pointer during the call.
+            let params_backend_c = config
+                .params_backend_spec()
+                .map(|spec| CString::new(spec).map_err(|_| SdError::InvalidParams {
+                    reason: "params_backend spec contains interior NUL byte".into(),
+                }))
+                .transpose()?;
+            if let Some(ref pb) = params_backend_c {
+                log::info!("Parameter placement: params_backend={:?}", pb);
+                params.params_backend = pb.as_ptr();
+            }
 
             let model_display = config.model_path.as_deref()
                 .or(config.diffusion_model_path.as_deref())
@@ -400,7 +411,11 @@ impl SdCppContext {
             if !ref_sd_images.is_empty() {
                 gen_params.ref_images = ref_sd_images.as_mut_ptr();
                 gen_params.ref_images_count = ref_sd_images.len() as i32;
-                gen_params.auto_resize_ref_image = true;
+                // `auto_resize_ref_image` / `increase_ref_index` were folded into the
+                // `ref_image_args` key-value string. Auto-resize is expressed there as
+                // `resize_before_vae`, which already defaults to true — the old value we
+                // set — so leaving ref_image_args empty preserves the previous behaviour
+                // and lets sd.cpp apply its per-model reference-image preset.
             }
 
             // LoRA adapters
@@ -458,7 +473,15 @@ impl SdCppContext {
                 params.seed
             );
 
-            let result_ptr = sd_sys::generate_image(self.ctx, &gen_params);
+            // generate_image() now returns a bool and writes results through out-params.
+            let mut result_ptr: *mut sd_sys::sd_image_t = std::ptr::null_mut();
+            let mut num_images_out: std::ffi::c_int = 0;
+            let ok = sd_sys::generate_image(
+                self.ctx,
+                &gen_params,
+                &mut result_ptr,
+                &mut num_images_out,
+            );
 
             // Clear callbacks immediately, then reclaim the boxed trampoline data.
             // Must happen in this order: clear first so sd.cpp can no longer call into it,
@@ -470,7 +493,10 @@ impl SdCppContext {
                 let _ = Box::from_raw(preview_trampoline_ptr);
             }
 
-            if result_ptr.is_null() {
+            if !ok || result_ptr.is_null() || num_images_out <= 0 {
+                if !result_ptr.is_null() {
+                    sd_sys::free_sd_images(result_ptr, num_images_out);
+                }
                 return Err(SdError::InferenceReturnedNull);
             }
 
@@ -485,7 +511,7 @@ impl SdCppContext {
                 w, h, ch, sd_img.data.is_null(), pixel_count, sd_img.data);
 
             if sd_img.data.is_null() || pixel_count == 0 {
-                libc::free(result_ptr as *mut c_void);
+                sd_sys::free_sd_images(result_ptr, num_images_out);
                 return Err(SdError::InferenceReturnedNull);
             }
 
@@ -522,12 +548,11 @@ impl SdCppContext {
                 src_slice.to_vec()
             };
 
-            // sd.cpp allocates the sd_image_t array with new[] and the pixel data with malloc().
-            // Both must be freed separately. Verified against sd.cpp source: generate_image()
-            // in stable-diffusion.cpp allocates `data` via stbi_write_png_to_mem / malloc,
-            // and the result array itself via operator new[].
-            libc::free(sd_img.data as *mut c_void);
-            libc::free(result_ptr as *mut c_void);
+            // free_sd_images releases both the pixel buffers and the array. sd.cpp added
+            // it specifically so callers stop freeing library-allocated memory themselves:
+            // on Windows the library and this crate may link different CRTs, and the old
+            // libc::free() path could corrupt the heap.
+            sd_sys::free_sd_images(result_ptr, num_images_out);
 
             Ok(GeneratedImage {
                 data: rgba_data,
@@ -782,11 +807,13 @@ mod tests {
             control_net_path: None,
             taesd_path: None,
         };
-        let result = SdCppContext::new(&config);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            SdError::ModelNotFound { path } => assert!(path.contains("nonexistent")),
-            other => panic!("Expected ModelNotFound, got: {:?}", other),
+        // Match on the Result directly rather than calling unwrap_err(): that
+        // requires the Ok type to implement Debug, and SdCppContext deliberately
+        // does not (it wraps a raw sd_ctx_t pointer).
+        match SdCppContext::new(&config) {
+            Err(SdError::ModelNotFound { path }) => assert!(path.contains("nonexistent")),
+            Err(other) => panic!("Expected ModelNotFound, got: {:?}", other),
+            Ok(_) => panic!("Expected ModelNotFound, got a context"),
         }
     }
 }

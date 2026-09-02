@@ -114,6 +114,10 @@ fn main() {
             if target_env == "gnu" {
                 println!("cargo:rustc-link-lib=stdc++");
             }
+            // ggml's CPU backend reads CPU topology from the registry
+            // (ggml_backend_cpu_device_context uses RegOpenKeyExA /
+            // RegQueryValueExA / RegCloseKey), which live in advapi32.
+            println!("cargo:rustc-link-lib=advapi32");
         }
         _ => {}
     }

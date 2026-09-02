@@ -133,14 +133,26 @@ pub(crate) fn generate_video(
             params.seed,
         );
 
+        // generate_video() now returns a bool and writes frames through out-params.
+        // `audio_out` is new; we don't consume audio, so pass null and never free it.
+        let mut result_ptr: *mut sd_sys::sd_image_t = std::ptr::null_mut();
         let mut num_frames_out: std::ffi::c_int = 0;
-        let result_ptr = sd_sys::generate_video(cpp_ctx.raw_ptr(), &vid_params, &mut num_frames_out);
+        let ok = sd_sys::generate_video(
+            cpp_ctx.raw_ptr(),
+            &vid_params,
+            &mut result_ptr,
+            &mut num_frames_out,
+            std::ptr::null_mut(), // audio_out — not requested
+        );
 
         // Clear progress callback before dropping trampoline
         sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
         let _ = Box::from_raw(trampoline_ptr);
 
-        if result_ptr.is_null() || num_frames_out <= 0 {
+        if !ok || result_ptr.is_null() || num_frames_out <= 0 {
+            if !result_ptr.is_null() {
+                sd_sys::free_sd_images(result_ptr, num_frames_out);
+            }
             return Err(SdError::InferenceReturnedNull);
         }
 
@@ -174,9 +186,6 @@ pub(crate) fn generate_video(
                 src_slice.to_vec()
             };
 
-            // Free each frame's pixel data (allocated by sd.cpp via malloc)
-            libc::free(sd_img.data as *mut c_void);
-
             frames.push(GeneratedImage {
                 data: rgba_data,
                 width: w,
@@ -184,8 +193,10 @@ pub(crate) fn generate_video(
             });
         }
 
-        // Free the frame array itself (allocated by sd.cpp via operator new[])
-        libc::free(result_ptr as *mut c_void);
+        // Release every frame and the array in one call, after all pixel data has
+        // been copied out. free_sd_images owns both the per-frame buffers and the
+        // array, so freeing frames individually would now be a double free.
+        sd_sys::free_sd_images(result_ptr, num_frames_out);
 
         if frames.is_empty() {
             return Err(SdError::InferenceReturnedNull);

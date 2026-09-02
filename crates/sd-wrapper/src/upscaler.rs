@@ -1,6 +1,6 @@
 //! Safe wrapper around sd.cpp's ESRGAN upscaler context.
 
-use std::ffi::{c_void, CString};
+use std::ffi::CString;
 use crate::error::SdError;
 use crate::types::GeneratedImage;
 
@@ -24,13 +24,17 @@ impl UpscalerContext {
             reason: "esrgan_path contains interior NUL byte".into(),
         })?;
 
+        // `offload_params_to_cpu` was removed from the C API; CPU placement is now
+        // expressed through the `backend` / `params_backend` assignment strings.
+        // Passing null for both keeps sd.cpp's default placement.
         let ctx = unsafe {
             sd_sys::new_upscaler_ctx(
                 path_c.as_ptr(),
-                false, // offload_params_to_cpu
                 false, // direct
                 n_threads,
                 512,   // tile_size
+                std::ptr::null(), // backend
+                std::ptr::null(), // params_backend
             )
         };
 
@@ -62,10 +66,31 @@ impl UpscalerContext {
             data: rgb_data.as_mut_ptr(),
         };
 
-        // upscale() returns sd_image_t BY VALUE (not a pointer)
-        let result = unsafe {
-            sd_sys::upscale(self.ctx, input_image, factor)
+        // upscale() now returns a bool and writes results through out-params.
+        let mut images_out: *mut sd_sys::sd_image_t = std::ptr::null_mut();
+        let mut num_images_out: std::ffi::c_int = 0;
+        let ok = unsafe {
+            sd_sys::upscale(
+                self.ctx,
+                input_image,
+                factor,
+                &mut images_out,
+                &mut num_images_out,
+            )
         };
+
+        if !ok || images_out.is_null() || num_images_out <= 0 {
+            if !images_out.is_null() {
+                unsafe { sd_sys::free_sd_images(images_out, num_images_out); }
+            }
+            return Err(SdError::InferenceReturnedNull);
+        }
+
+        // Guard that frees the sd.cpp-owned buffer on every exit path below.
+        // sd.cpp allocates this inside the library, so it must be released by
+        // free_sd_images rather than libc::free — on Windows the library and this
+        // crate can link different CRTs, and cross-CRT frees corrupt the heap.
+        let result = unsafe { *images_out };
 
         let out_w = result.width;
         let out_h = result.height;
@@ -73,10 +98,7 @@ impl UpscalerContext {
         let pixel_count = (out_w as usize) * (out_h as usize) * (out_ch as usize);
 
         if result.data.is_null() || pixel_count == 0 {
-            // Free if non-null before returning error
-            if !result.data.is_null() {
-                unsafe { libc::free(result.data as *mut c_void); }
-            }
+            unsafe { sd_sys::free_sd_images(images_out, num_images_out); }
             return Err(SdError::InferenceReturnedNull);
         }
 
@@ -96,8 +118,8 @@ impl UpscalerContext {
             src_slice.to_vec()
         };
 
-        // Free the data pointer allocated by sd.cpp
-        unsafe { libc::free(result.data as *mut c_void); }
+        // Release the sd.cpp-owned image array (frees both the pixel data and the array).
+        unsafe { sd_sys::free_sd_images(images_out, num_images_out); }
 
         Ok(GeneratedImage {
             data: rgba_data,
