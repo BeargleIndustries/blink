@@ -1,5 +1,6 @@
 import { Component, For, Show } from "solid-js";
 import type { ModelInfo } from "../lib/types";
+import { FEATURE_BADGES, FEATURE_ORDER } from "../lib/capabilities";
 import LicenseInfo from "./LicenseInfo";
 
 interface ModelCardProps {
@@ -79,6 +80,32 @@ const ModelCard: Component<ModelCardProps> = (props) => {
         }}>
           {props.model.architecture.toUpperCase()}
         </span>
+      </div>
+
+      {/* Capability badges: what this model can actually do in Blink. */}
+      <div style={{
+        display: "flex",
+        gap: "6px",
+        "flex-wrap": "wrap",
+        "font-size": "11px",
+        "margin-top": "6px",
+      }}>
+        <For each={FEATURE_ORDER.filter((f) => props.model.features?.includes(f))}>
+          {(f) => (
+            <span
+              title={FEATURE_BADGES[f].title}
+              style={{
+                padding: "2px 7px",
+                border: `1px solid ${FEATURE_BADGES[f].color}`,
+                color: FEATURE_BADGES[f].color,
+                "border-radius": "var(--radius-pill)",
+                opacity: "0.9",
+              }}
+            >
+              {FEATURE_BADGES[f].label}
+            </span>
+          )}
+        </For>
       </div>
 
       <LicenseInfo

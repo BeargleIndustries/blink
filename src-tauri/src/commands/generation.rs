@@ -95,7 +95,7 @@ pub async fn generate_image(
     // and the process dies with an access violation (reproduced 2026-09-03).
     // Refuse here with a real error instead. Keep in sync with
     // src/lib/capabilities.ts, which decides what the UI offers.
-    const EDIT_ARCHITECTURES: &[&str] = &["flux-kontext"];
+    const EDIT_ARCHITECTURES: &[&str] = &["flux-kontext", "flux2-klein", "flux2-klein-9b"];
     let wants_edit = request.ref_images.as_ref().is_some_and(|r| !r.is_empty());
     let architecture = request.architecture.as_deref().unwrap_or("");
     if wants_edit && !EDIT_ARCHITECTURES.contains(&architecture) {

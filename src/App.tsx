@@ -132,7 +132,7 @@ const App: Component = () => {
   const activeModel = () => models().find((m) => m.active) ?? null;
   // Reference-image editing is only offered for models that support it; sending
   // a reference image to any other model crashes sd.cpp (see lib/capabilities).
-  const canEdit = () => supportsEdit(activeModel()?.architecture);
+  const canEdit = () => supportsEdit(activeModel());
   createEffect(() => {
     if (!canEdit()) setEditMode(false);
   });

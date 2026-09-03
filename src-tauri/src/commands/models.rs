@@ -30,6 +30,11 @@ pub struct ManifestModel {
     pub architecture: String,
     #[serde(default)]
     pub category: Option<String>,
+    /// What the model can do, shown as badges in the browser and used to gate
+    /// UI modes: txt2img, img2img, edit, video, i2v, upscale, controlnet,
+    /// preview, fast, text, anime.
+    #[serde(default)]
+    pub features: Vec<String>,
     #[serde(default = "default_512")]
     pub default_width: u32,
     #[serde(default = "default_512")]
@@ -80,6 +85,7 @@ pub struct ModelInfo {
     pub name: String,
     pub description: String,
     pub architecture: String,
+    pub features: Vec<String>,
     pub size_bytes: u64,
     pub vram_mb: u64,
     pub license_name: String,
@@ -273,6 +279,7 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
             name: m.name.clone(),
             description: m.description.clone(),
             architecture: m.architecture.clone(),
+            features: if m.features.is_empty() { architecture_features(&m.architecture) } else { m.features.clone() },
             size_bytes: m.size_bytes,
             vram_mb: m.vram_mb,
             license_name: m.license.as_ref().map(|l| l.name.clone()).unwrap_or_default(),
@@ -306,6 +313,7 @@ pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, St
                 id: id.clone(),
                 name: display_name,
                 description: "Custom imported model".to_string(),
+                features: architecture_features(&arch),
                 architecture: arch,
                 size_bytes,
                 vram_mb: 0,
@@ -1050,14 +1058,26 @@ fn detect_architecture(filename: &str, repo: &str) -> String {
     let repo_lower = repo.to_lowercase();
 
     // Order matters — check more specific patterns first
-    if fname_lower.contains("z-image") || fname_lower.contains("z_image")
-        || repo_lower.contains("z-image") || repo_lower.contains("z_image") {
+    let has = |s: &str| fname_lower.contains(s) || repo_lower.contains(s);
+    if has("z-image") || has("z_image") {
         "z-image".to_string()
-    } else if fname_lower.contains("kontext") || repo_lower.contains("kontext") {
+    } else if has("kontext") {
         "flux-kontext".to_string()
-    } else if fname_lower.contains("flux") || repo_lower.contains("flux") {
+    } else if has("klein") {
+        if has("9b") { "flux2-klein-9b".to_string() } else { "flux2-klein".to_string() }
+    } else if has("chroma") {
+        "chroma".to_string()
+    } else if has("anima") {
+        "anima".to_string()
+    } else if has("ernie") {
+        "ernie-image".to_string()
+    } else if has("qwen-image") || has("qwen_image") {
+        "qwen-image".to_string()
+    } else if has("flux") {
         "flux".to_string()
-    } else if fname_lower.contains("wan") || repo_lower.contains("wan") {
+    } else if has("wan2.2") || has("wan22") {
+        "wan22".to_string()
+    } else if has("wan") {
         "wan".to_string()
     } else if fname_lower.contains("sdxl") || fname_lower.contains("sd_xl")
         || repo_lower.contains("sdxl") || repo_lower.contains("sd_xl") {
@@ -1080,10 +1100,39 @@ fn get_companion_files(architecture: &str) -> Vec<CompanionFile> {
             CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-4B-Instruct-2507-GGUF".into(), filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into() },
             CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into() },
         ],
+        // Wan uses the umt5-xxl encoder (sd.cpp docs/wan.md), not FLUX's T5, and
+        // no CLIP-L. Wan 2.2's 5B TI2V model has its own VAE.
         "wan" => vec![
-            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into() },
+            CompanionFile { role: "t5xxl".into(), repo: "city96/umt5-xxl-encoder-gguf".into(), filename: "umt5-xxl-encoder-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/Wan_2.1_ComfyUI_repackaged".into(), filename: "split_files/vae/wan_2.1_vae.safetensors".into() },
+        ],
+        "wan22" => vec![
+            CompanionFile { role: "t5xxl".into(), repo: "city96/umt5-xxl-encoder-gguf".into(), filename: "umt5-xxl-encoder-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/Wan_2.2_ComfyUI_Repackaged".into(), filename: "split_files/vae/wan2.2_vae.safetensors".into() },
+        ],
+        "flux2-klein" => vec![
+            CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-4B-GGUF".into(), filename: "Qwen3-4B-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/flux2-klein-4B".into(), filename: "split_files/vae/flux2-vae.safetensors".into() },
+        ],
+        "flux2-klein-9b" => vec![
+            CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-8B-GGUF".into(), filename: "Qwen3-8B-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/flux2-klein-4B".into(), filename: "split_files/vae/flux2-vae.safetensors".into() },
+        ],
+        "chroma" => vec![
             CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into() },
-            CompanionFile { role: "vae".into(), repo: "Wan-AI/Wan2.1-T2V-1.3B".into(), filename: "Wan2.1_VAE.pth".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into() },
+        ],
+        "anima" => vec![
+            CompanionFile { role: "llm".into(), repo: "mradermacher/Qwen3-0.6B-Base-GGUF".into(), filename: "Qwen3-0.6B-Base.Q8_0.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "circlestone-labs/Anima".into(), filename: "split_files/vae/qwen_image_vae.safetensors".into() },
+        ],
+        "ernie-image" => vec![
+            CompanionFile { role: "llm".into(), repo: "unsloth/Ministral-3-3B-Instruct-2512-GGUF".into(), filename: "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/ERNIE-Image".into(), filename: "vae/flux2-vae.safetensors".into() },
+        ],
+        "qwen-image" => vec![
+            CompanionFile { role: "llm".into(), repo: "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF".into(), filename: "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/Qwen-Image_ComfyUI".into(), filename: "split_files/vae/qwen_image_vae.safetensors".into() },
         ],
         _ => vec![], // sd1, sdxl, sd3 — single file, no companions
     }
@@ -1130,11 +1179,34 @@ fn architecture_defaults(arch: &str) -> (u32, u32, u32, f32, String) {
     match arch {
         "flux" => (1024, 1024, 4, 1.0, "euler".into()),
         "flux-kontext" => (1024, 1024, 25, 3.5, "euler".into()),
+        // FLUX.2 klein is step-distilled: 4 steps, no CFG (sd.cpp docs/flux2.md).
+        "flux2-klein" | "flux2-klein-9b" => (1024, 1024, 4, 1.0, "euler".into()),
         "z-image" => (512, 1024, 4, 1.0, "euler".into()),
-        "wan" => (832, 480, 30, 6.0, "euler".into()),
+        "chroma" => (1024, 1024, 20, 4.0, "euler".into()),
+        "anima" => (1024, 1024, 25, 6.0, "euler".into()),
+        "ernie-image" => (1024, 1024, 8, 1.0, "euler".into()),
+        "qwen-image" => (1024, 1024, 20, 2.5, "euler".into()),
+        "wan" | "wan22" => (832, 480, 20, 6.0, "euler".into()),
         "sdxl" => (1024, 1024, 25, 7.0, "euler_a".into()),
         _ => (512, 512, 20, 7.0, "euler_a".into()), // sd1 default
     }
+}
+
+/// Feature badges for a model that did not declare its own (custom imports,
+/// older catalog entries). Keep in sync with `features` in models.json.
+fn architecture_features(arch: &str) -> Vec<String> {
+    let f: &[&str] = match arch {
+        "flux-kontext" | "flux2-klein" | "flux2-klein-9b" => &["txt2img", "img2img", "edit"],
+        "flux" | "z-image" | "ernie-image" => &["txt2img", "img2img", "fast"],
+        "chroma" | "qwen-image" => &["txt2img", "img2img", "text"],
+        "anima" => &["txt2img", "img2img", "anime"],
+        "wan" | "wan22" => &["video"],
+        "esrgan" => &["upscale"],
+        "controlnet" => &["controlnet"],
+        "taesd" => &["preview"],
+        _ => &["txt2img", "img2img"],
+    };
+    f.iter().map(|s| s.to_string()).collect()
 }
 
 fn unix_timestamp() -> String {

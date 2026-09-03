@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### Added
+- **Model catalog: new models with capability badges.** Every card now shows what a model can do
+  (Text → Image, Image → Image, Edit, Fast, Video, Text, Anime, Upscale). New entries, all
+  verified against Hugging Face: FLUX.2 klein 4B (Apache-2.0, generates and edits in 4 steps),
+  FLUX.2 klein 9B (non-commercial), Chroma1-HD, Anima 2, ERNIE-Image Turbo, Wan 2.2 5B, and
+  Qwen-Image. Edit Mode is offered for any model carrying the Edit badge (Kontext, klein).
+  The Wan 2.1 entry pointed at an empty repo and the wrong text encoder; fixed.
+
 ### Fixed
 - **Edit Mode crashed the app on Z-Image.** Reference-image editing only works on models
   trained for it (Flux Kontext); sd.cpp does not check, and a reference image on Z-Image

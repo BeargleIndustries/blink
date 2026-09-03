@@ -23,7 +23,14 @@
       },
       "tier": 1,
       "available": true,
-      "recommended_for": ["low_vram", "beginners"]
+      "recommended_for": [
+        "low_vram",
+        "beginners"
+      ],
+      "features": [
+        "txt2img",
+        "img2img"
+      ]
     },
     {
       "id": "sdxl-q4",
@@ -47,7 +54,13 @@
       },
       "tier": 1,
       "available": true,
-      "recommended_for": ["quality"]
+      "recommended_for": [
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img"
+      ]
     },
     {
       "id": "flux-schnell-q4",
@@ -99,7 +112,15 @@
           "required": true
         }
       ],
-      "recommended_for": ["speed", "quality"]
+      "recommended_for": [
+        "speed",
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "fast"
+      ]
     },
     {
       "id": "sd15-q8",
@@ -123,7 +144,13 @@
         "commercial": true
       },
       "tier": 2,
-      "recommended_for": ["quality"]
+      "recommended_for": [
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img"
+      ]
     },
     {
       "id": "flux-dev-q4",
@@ -175,7 +202,13 @@
         "commercial": false
       },
       "tier": 2,
-      "recommended_for": ["quality"]
+      "recommended_for": [
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img"
+      ]
     },
     {
       "id": "z-image-turbo",
@@ -220,7 +253,14 @@
       },
       "tier": 1,
       "available": true,
-      "recommended_for": ["speed"]
+      "recommended_for": [
+        "speed"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "fast"
+      ]
     },
     {
       "id": "z-image-turbo-q8",
@@ -265,7 +305,14 @@
       },
       "tier": 2,
       "available": true,
-      "recommended_for": ["quality"]
+      "recommended_for": [
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "fast"
+      ]
     },
     {
       "id": "flux-kontext-dev-q4",
@@ -318,7 +365,15 @@
           "required": true
         }
       ],
-      "recommended_for": ["image-editing", "inpainting"]
+      "recommended_for": [
+        "image-editing",
+        "inpainting"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "edit"
+      ]
     },
     {
       "id": "flux-kontext-dev-q8",
@@ -371,7 +426,15 @@
           "required": true
         }
       ],
-      "recommended_for": ["image-editing", "quality"]
+      "recommended_for": [
+        "image-editing",
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "edit"
+      ]
     },
     {
       "id": "realesrgan-x4plus",
@@ -398,7 +461,12 @@
           "required": true
         }
       ],
-      "recommended_for": ["upscaling"]
+      "recommended_for": [
+        "upscaling"
+      ],
+      "features": [
+        "upscale"
+      ]
     },
     {
       "id": "realesrgan-x4plus-anime",
@@ -425,7 +493,13 @@
           "required": true
         }
       ],
-      "recommended_for": ["upscaling", "anime"]
+      "recommended_for": [
+        "upscaling",
+        "anime"
+      ],
+      "features": [
+        "upscale"
+      ]
     },
     {
       "id": "controlnet-canny-sd15",
@@ -452,7 +526,13 @@
           "required": true
         }
       ],
-      "recommended_for": ["controlled-generation", "composition"]
+      "recommended_for": [
+        "controlled-generation",
+        "composition"
+      ],
+      "features": [
+        "controlnet"
+      ]
     },
     {
       "id": "taesd-sd15",
@@ -479,7 +559,12 @@
           "required": true
         }
       ],
-      "recommended_for": ["preview"]
+      "recommended_for": [
+        "preview"
+      ],
+      "features": [
+        "preview"
+      ]
     },
     {
       "id": "taesd-sdxl",
@@ -506,7 +591,12 @@
           "required": true
         }
       ],
-      "recommended_for": ["preview"]
+      "recommended_for": [
+        "preview"
+      ],
+      "features": [
+        "preview"
+      ]
     },
     {
       "id": "taesd-flux",
@@ -533,20 +623,25 @@
           "required": true
         }
       ],
-      "recommended_for": ["preview"]
+      "recommended_for": [
+        "preview"
+      ],
+      "features": [
+        "preview"
+      ]
     },
     {
       "id": "wan21-t2v-1.3b-q4",
       "name": "Wan 2.1 Text-to-Video (1.3B, Q4)",
       "description": "Open-source video generation. Generates short video clips from text prompts.",
       "sha256": "pending-verification",
-      "size_bytes": 5000000000,
+      "size_bytes": 4890000000,
       "vram_mb": 8000,
       "architecture": "wan",
       "category": "video",
       "default_width": 832,
       "default_height": 480,
-      "default_steps": 30,
+      "default_steps": 20,
       "default_cfg": 6.0,
       "default_sampler": "euler",
       "license": {
@@ -559,36 +654,33 @@
       "files": [
         {
           "role": "diffusion_model",
-          "repo": "QuantStack/Wan2.1-T2V-1.3B-GGUF",
-          "filename": "wan2.1-t2v-1.3b-Q4_K_M.gguf",
-          "size_bytes": 2600000000,
-          "required": true,
-          "_note": "Verify exact filename at QuantStack/Wan2.1-T2V-1.3B-GGUF on HuggingFace"
-        },
-        {
-          "role": "clip_l",
-          "repo": "comfyanonymous/flux_text_encoders",
-          "filename": "clip_l.safetensors",
-          "size_bytes": 300000000,
+          "repo": "samuelchristlie/Wan2.1-T2V-1.3B-GGUF",
+          "filename": "Wan2.1-T2V-1.3B-Q4_K_M.gguf",
+          "size_bytes": 980000000,
           "required": true
         },
         {
           "role": "t5xxl",
-          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
-          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
-          "size_bytes": 2500000000,
+          "repo": "city96/umt5-xxl-encoder-gguf",
+          "filename": "umt5-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 3660000000,
           "required": true
         },
         {
           "role": "vae",
-          "repo": "Wan-AI/Wan2.1-T2V-1.3B",
-          "filename": "Wan2.1_VAE.pth",
-          "size_bytes": 400000000,
-          "required": true,
-          "_note": "Verify exact VAE filename at Wan-AI/Wan2.1-T2V-1.3B on HuggingFace"
+          "repo": "Comfy-Org/Wan_2.1_ComfyUI_repackaged",
+          "filename": "split_files/vae/wan_2.1_vae.safetensors",
+          "size_bytes": 250000000,
+          "required": true
         }
       ],
-      "recommended_for": ["video", "animation"]
+      "recommended_for": [
+        "video",
+        "animation"
+      ],
+      "features": [
+        "video"
+      ]
     },
     {
       "id": "flux-schnell-q8",
@@ -640,7 +732,440 @@
         "commercial": true
       },
       "tier": 2,
-      "recommended_for": ["quality"]
+      "recommended_for": [
+        "quality"
+      ],
+      "features": [
+        "txt2img",
+        "img2img",
+        "fast"
+      ]
+    },
+    {
+      "id": "flux2-klein-4b-q8",
+      "name": "FLUX.2 klein 4B (Q8)",
+      "description": "Generates and edits. 4 steps, Apache-2.0. Load an image, switch to Edit Mode, and describe the change. The best all-rounder for most GPUs.",
+      "sha256": "pending-verification",
+      "size_bytes": 7140000000,
+      "vram_mb": 8000,
+      "architecture": "flux2-klein",
+      "features": [
+        "txt2img",
+        "img2img",
+        "edit",
+        "fast"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "unsloth/FLUX.2-klein-4B-GGUF",
+          "filename": "flux-2-klein-4b-Q8_0.gguf",
+          "size_bytes": 4300000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Qwen3-4B-GGUF",
+          "filename": "Qwen3-4B-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/flux2-klein-4B",
+          "filename": "split_files/vae/flux2-vae.safetensors",
+          "size_bytes": 340000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "recommended_for": [
+        "image-editing",
+        "beginners",
+        "quality"
+      ]
+    },
+    {
+      "id": "flux2-klein-4b-q4",
+      "name": "FLUX.2 klein 4B (Q4)",
+      "description": "Same model as the Q8, smaller and a little rougher. Generates and edits in 4 steps on 6 GB cards.",
+      "sha256": "pending-verification",
+      "size_bytes": 5440000000,
+      "vram_mb": 6000,
+      "architecture": "flux2-klein",
+      "features": [
+        "txt2img",
+        "img2img",
+        "edit",
+        "fast"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "unsloth/FLUX.2-klein-4B-GGUF",
+          "filename": "flux-2-klein-4b-Q4_K_M.gguf",
+          "size_bytes": 2600000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Qwen3-4B-GGUF",
+          "filename": "Qwen3-4B-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/flux2-klein-4B",
+          "filename": "split_files/vae/flux2-vae.safetensors",
+          "size_bytes": 340000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-4B",
+        "commercial": true
+      },
+      "tier": 1,
+      "available": true,
+      "recommended_for": [
+        "image-editing",
+        "low_vram"
+      ]
+    },
+    {
+      "id": "flux2-klein-9b-q4",
+      "name": "FLUX.2 klein 9B (Q4)",
+      "description": "The bigger klein: sharper detail and better prompt following, still 4 steps. Needs ~12 GB. Non-commercial license.",
+      "sha256": "pending-verification",
+      "size_bytes": 11280000000,
+      "vram_mb": 12000,
+      "architecture": "flux2-klein-9b",
+      "features": [
+        "txt2img",
+        "img2img",
+        "edit",
+        "fast"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "unsloth/FLUX.2-klein-9B-GGUF",
+          "filename": "flux-2-klein-9b-Q4_K_M.gguf",
+          "size_bytes": 5910000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Qwen3-8B-GGUF",
+          "filename": "Qwen3-8B-Q4_K_M.gguf",
+          "size_bytes": 5030000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/flux2-klein-4B",
+          "filename": "split_files/vae/flux2-vae.safetensors",
+          "size_bytes": 340000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 4,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "FLUX Non-Commercial License",
+        "url": "https://huggingface.co/black-forest-labs/FLUX.2-klein-9B",
+        "commercial": false
+      },
+      "tier": 3,
+      "available": true,
+      "recommended_for": [
+        "image-editing",
+        "quality"
+      ]
+    },
+    {
+      "id": "chroma1-hd-q4",
+      "name": "Chroma1-HD (Q4)",
+      "description": "Community FLUX-family model, fully Apache-2.0. Strong at text in images and varied styles. Uses the same T5 encoder as FLUX.",
+      "sha256": "pending-verification",
+      "size_bytes": 8270000000,
+      "vram_mb": 9000,
+      "architecture": "chroma",
+      "features": [
+        "txt2img",
+        "img2img",
+        "text"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "silveroxides/Chroma1-HD-GGUF",
+          "filename": "Chroma1-HD-Q4_K_M.gguf",
+          "size_bytes": 5570000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/t5-v1_1-xxl-encoder-gguf",
+          "filename": "t5-v1_1-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 2500000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/z_image_turbo",
+          "filename": "split_files/vae/ae.safetensors",
+          "size_bytes": 200000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 20,
+      "default_cfg": 4.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/lodestones/Chroma1-HD",
+        "commercial": true
+      },
+      "tier": 2,
+      "available": true,
+      "recommended_for": [
+        "quality"
+      ]
+    },
+    {
+      "id": "anima2-q8",
+      "name": "Anima 2 (Q8)",
+      "description": "Anime and illustration model with a tiny text encoder: about 3 GB total, runs on 4 GB cards. Non-commercial license.",
+      "sha256": "pending-verification",
+      "size_bytes": 3130000000,
+      "vram_mb": 4500,
+      "architecture": "anima",
+      "features": [
+        "txt2img",
+        "img2img",
+        "anime"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "JusteLeo/Anima2-GGUF",
+          "filename": "anima-preview2_q8_0.gguf",
+          "size_bytes": 2240000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "mradermacher/Qwen3-0.6B-Base-GGUF",
+          "filename": "Qwen3-0.6B-Base.Q8_0.gguf",
+          "size_bytes": 640000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "circlestone-labs/Anima",
+          "filename": "split_files/vae/qwen_image_vae.safetensors",
+          "size_bytes": 250000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 25,
+      "default_cfg": 6.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Circlestone Labs Non-Commercial",
+        "url": "https://huggingface.co/circlestone-labs/Anima",
+        "commercial": false
+      },
+      "tier": 2,
+      "available": true,
+      "recommended_for": [
+        "low_vram",
+        "anime"
+      ]
+    },
+    {
+      "id": "ernie-image-turbo-q4",
+      "name": "ERNIE-Image Turbo (Q4)",
+      "description": "Baidu's distilled model: 8 steps, good photorealism, small 3B text encoder. Apache-2.0.",
+      "sha256": "pending-verification",
+      "size_bytes": 7510000000,
+      "vram_mb": 8000,
+      "architecture": "ernie-image",
+      "features": [
+        "txt2img",
+        "img2img",
+        "fast"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "unsloth/ERNIE-Image-Turbo-GGUF",
+          "filename": "ernie-image-turbo-Q4_K_M.gguf",
+          "size_bytes": 5020000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "unsloth/Ministral-3-3B-Instruct-2512-GGUF",
+          "filename": "Ministral-3-3B-Instruct-2512-Q4_K_M.gguf",
+          "size_bytes": 2150000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/ERNIE-Image",
+          "filename": "vae/flux2-vae.safetensors",
+          "size_bytes": 340000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 8,
+      "default_cfg": 1.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/baidu/ERNIE-Image-Turbo",
+        "commercial": true
+      },
+      "tier": 2,
+      "available": true,
+      "recommended_for": [
+        "quality"
+      ]
+    },
+    {
+      "id": "wan22-ti2v-5b-q4",
+      "name": "Wan 2.2 Video (5B, Q4)",
+      "description": "Text-to-video and image-to-video in one model. Short clips at 832×480. Apache-2.0.",
+      "sha256": "pending-verification",
+      "size_bytes": 8500000000,
+      "vram_mb": 10000,
+      "architecture": "wan22",
+      "category": "video",
+      "features": [
+        "video",
+        "i2v"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "QuantStack/Wan2.2-TI2V-5B-GGUF",
+          "filename": "Wan2.2-TI2V-5B-Q4_K_M.gguf",
+          "size_bytes": 3430000000,
+          "required": true
+        },
+        {
+          "role": "t5xxl",
+          "repo": "city96/umt5-xxl-encoder-gguf",
+          "filename": "umt5-xxl-encoder-Q4_K_M.gguf",
+          "size_bytes": 3660000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+          "filename": "split_files/vae/wan2.2_vae.safetensors",
+          "size_bytes": 1410000000,
+          "required": true
+        }
+      ],
+      "default_width": 832,
+      "default_height": 480,
+      "default_steps": 20,
+      "default_cfg": 6.0,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Wan-AI/Wan2.2-TI2V-5B",
+        "commercial": true
+      },
+      "tier": 2,
+      "available": true,
+      "recommended_for": [
+        "video",
+        "animation"
+      ]
+    },
+    {
+      "id": "qwen-image-q4",
+      "name": "Qwen-Image (Q4)",
+      "description": "Alibaba's 20B model, the best open model for readable text and posters. Big: 18 GB download, needs 16 GB VRAM or low-memory mode. Apache-2.0.",
+      "sha256": "pending-verification",
+      "size_bytes": 18000000000,
+      "vram_mb": 16000,
+      "architecture": "qwen-image",
+      "features": [
+        "txt2img",
+        "img2img",
+        "text"
+      ],
+      "files": [
+        {
+          "role": "diffusion_model",
+          "repo": "QuantStack/Qwen-Image-GGUF",
+          "filename": "Qwen_Image-Q4_K_M.gguf",
+          "size_bytes": 13070000000,
+          "required": true
+        },
+        {
+          "role": "llm",
+          "repo": "mradermacher/Qwen2.5-VL-7B-Instruct-GGUF",
+          "filename": "Qwen2.5-VL-7B-Instruct.Q4_K_M.gguf",
+          "size_bytes": 4680000000,
+          "required": true
+        },
+        {
+          "role": "vae",
+          "repo": "Comfy-Org/Qwen-Image_ComfyUI",
+          "filename": "split_files/vae/qwen_image_vae.safetensors",
+          "size_bytes": 250000000,
+          "required": true
+        }
+      ],
+      "default_width": 1024,
+      "default_height": 1024,
+      "default_steps": 20,
+      "default_cfg": 2.5,
+      "default_sampler": "euler",
+      "license": {
+        "name": "Apache 2.0",
+        "url": "https://huggingface.co/Qwen/Qwen-Image",
+        "commercial": true
+      },
+      "tier": 3,
+      "available": true,
+      "recommended_for": [
+        "quality",
+        "text"
+      ]
     }
   ]
 }

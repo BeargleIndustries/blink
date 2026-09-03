@@ -57,6 +57,8 @@ export interface ModelInfo {
   name: string;
   description: string;
   architecture: string;
+  /** Capability badges from the catalog: txt2img, img2img, edit, video, … */
+  features: string[];
   size_bytes: number;
   vram_mb: number;
   license_name: string;
