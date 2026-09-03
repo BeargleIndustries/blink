@@ -18,6 +18,7 @@ export interface GenerationRequest {
   ref_images?: number[][];
   img_cfg?: number;
   loras?: LoraConfig[];
+  architecture?: string;
   control_strength?: number;
 }
 

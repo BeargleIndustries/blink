@@ -459,6 +459,18 @@ impl SdCppContext {
         }
 
         // --- Build LoRA structs ---
+        eprintln!("[blink] LoRA count: {}", params.loras.len());
+        for (i, lora) in params.loras.iter().enumerate() {
+            let exists = std::path::Path::new(&lora.path).exists();
+            let file_size = std::fs::metadata(&lora.path).map(|m| m.len()).unwrap_or(0);
+            eprintln!(
+                "[blink] LoRA[{}]: path='{}', multiplier={}, is_high_noise={}, exists={}, size={}",
+                i, lora.path, lora.multiplier, lora.is_high_noise, exists, file_size
+            );
+            if !exists {
+                eprintln!("[blink] WARNING: LoRA file does not exist: {}", lora.path);
+            }
+        }
         let lora_path_cstrings: Vec<CString> = params.loras.iter()
             .map(|l| CString::new(l.path.as_str()).map_err(|_| SdError::InvalidParams {
                 reason: format!("LoRA path contains interior NUL byte: {}", l.path),
@@ -643,6 +655,20 @@ impl SdCppContext {
             if !lora_structs.is_empty() {
                 gen_params.loras = lora_structs.as_ptr();
                 gen_params.lora_count = lora_structs.len() as u32;
+                eprintln!(
+                    "[blink] Setting gen_params: lora_count={}, loras_ptr={:?}",
+                    gen_params.lora_count, gen_params.loras
+                );
+                // Verify the CString pointers are valid
+                for (i, ls) in lora_structs.iter().enumerate() {
+                    let path_str = std::ffi::CStr::from_ptr(ls.path).to_string_lossy();
+                    eprintln!(
+                        "[blink] gen_params.loras[{}]: path_cstr='{}', multiplier={}, is_high_noise={}",
+                        i, path_str, ls.multiplier, ls.is_high_noise
+                    );
+                }
+            } else {
+                eprintln!("[blink] No LoRAs to apply");
             }
 
             // ControlNet

@@ -27,6 +27,7 @@ pub struct GenerationRequest {
     pub ref_images: Option<Vec<Vec<u8>>>,
     pub img_cfg: Option<f32>,
     pub loras: Option<Vec<LoraRequest>>,
+    pub architecture: Option<String>,
     pub control_strength: Option<f32>,
 }
 
@@ -90,10 +91,23 @@ pub async fn generate_image(
 
     let app_handle = state.app_handle.clone();
 
+    // Z-Image applies LoRA 4x (sd.cpp issue #1071) — auto-compensate
+    let is_z_image = request.architecture.as_deref() == Some("z-image");
+    let lora_divisor = if is_z_image { 4.0 } else { 1.0 };
+
     let loras: Vec<LoraConfig> = request.loras.unwrap_or_default()
         .into_iter()
-        .map(|l| LoraConfig { path: l.path, multiplier: l.multiplier, is_high_noise: false })
+        .map(|l| {
+            let adjusted = l.multiplier / lora_divisor;
+            log::info!(
+                "[blink] LoRA: path='{}', user_multiplier={}, adjusted={} ({})",
+                l.path, l.multiplier, adjusted,
+                if is_z_image { "z-image 4x compensation" } else { "no compensation" }
+            );
+            LoraConfig { path: l.path, multiplier: adjusted, is_high_noise: false }
+        })
         .collect();
+    log::info!("[blink] Total LoRAs: {}, architecture={:?}", loras.len(), request.architecture);
 
     let params = GenerationParams {
         prompt: request.prompt.clone(),

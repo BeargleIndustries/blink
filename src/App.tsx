@@ -352,6 +352,7 @@ const App: Component = () => {
         ref_images: (isEditMode && inputBytes) ? [inputBytes] : undefined,
         img_cfg: isEditMode ? imgCfg() : undefined,
         loras: loras().length > 0 ? loras() : undefined,
+        architecture: activeModel()?.architecture,
         control_strength: controlNetEnabled() ? controlStrength() : undefined,
       });
     } catch (err) {

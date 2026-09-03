@@ -1,4 +1,5 @@
 import { Component, For, Show } from "solid-js";
+import { open } from "@tauri-apps/plugin-dialog";
 import type { LoraConfig } from "../lib/types";
 
 interface LoraPickerProps {
@@ -10,32 +11,22 @@ interface LoraPickerProps {
 const MAX_LORAS = 5;
 
 const LoraPicker: Component<LoraPickerProps> = (props) => {
-  let fileInputRef: HTMLInputElement | undefined;
+  const handleAddLora = async () => {
+    const selected = await open({
+      multiple: true,
+      filters: [{ name: "LoRA Models", extensions: ["safetensors", "gguf"] }],
+    });
+    if (!selected) return;
 
-  const labelStyle = {
-    "font-size": "12px",
-    color: "var(--text-secondary)",
-  } as const;
-
-  const handleFileSelect = (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement;
-    const files = input.files;
-    if (!files || files.length === 0) return;
-
+    const paths = Array.isArray(selected) ? selected : [selected];
     const newLoras: LoraConfig[] = [...props.loras];
-    for (let i = 0; i < files.length; i++) {
+    for (const path of paths) {
       if (newLoras.length >= MAX_LORAS) break;
-      const file = files[i];
-      // Use the file path — in Tauri desktop context webkitRelativePath or name
-      const path = (file as any).path || file.name;
-      // Avoid duplicates
       if (!newLoras.some((l) => l.path === path)) {
         newLoras.push({ path, multiplier: 1.0 });
       }
     }
     props.onLorasChange(newLoras);
-    // Reset so the same file can be re-added after removal
-    input.value = "";
   };
 
   const handleRemove = (index: number) => {
@@ -76,7 +67,7 @@ const LoraPicker: Component<LoraPickerProps> = (props) => {
           </div>
           <Show when={props.loras.length < MAX_LORAS}>
             <button
-              onClick={() => fileInputRef?.click()}
+              onClick={handleAddLora}
               style={{
                 padding: "3px 10px",
                 background: "var(--bg-tertiary)",
@@ -91,15 +82,6 @@ const LoraPicker: Component<LoraPickerProps> = (props) => {
             </button>
           </Show>
         </div>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".safetensors,.gguf"
-          multiple
-          style={{ display: "none" }}
-          onInput={handleFileSelect}
-        />
 
         <Show when={props.loras.length === 0}>
           <div style={{
@@ -116,59 +98,79 @@ const LoraPicker: Component<LoraPickerProps> = (props) => {
           <For each={props.loras}>
             {(lora, index) => (
               <div style={{
-                display: "flex",
-                "align-items": "center",
-                gap: "8px",
                 padding: "6px 8px",
                 background: "var(--bg-primary)",
                 "border-radius": "4px",
                 border: "1px solid var(--border)",
+                overflow: "hidden",
               }}>
-                <span
-                  title={lora.path}
-                  style={{
+                <div style={{
+                  display: "flex",
+                  "align-items": "center",
+                  "justify-content": "space-between",
+                  "margin-bottom": "4px",
+                }}>
+                  <span
+                    title={lora.path}
+                    style={{
+                      "font-size": "12px",
+                      color: "var(--text-primary)",
+                      "white-space": "nowrap",
+                      overflow: "hidden",
+                      "text-overflow": "ellipsis",
+                      "min-width": "0",
+                      flex: "1",
+                    }}
+                  >
+                    {shortName(lora.path)}
+                  </span>
+                  <button
+                    onClick={() => handleRemove(index())}
+                    title="Remove LoRA"
+                    style={{
+                      padding: "2px 6px",
+                      background: "none",
+                      border: "1px solid var(--border)",
+                      "border-radius": "4px",
+                      color: "var(--text-muted)",
+                      cursor: "pointer",
+                      "font-size": "11px",
+                      "flex-shrink": "0",
+                      "margin-left": "8px",
+                    }}
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "8px",
+                }}>
+                  <span style={{ "font-size": "10px", color: "var(--text-muted)", "flex-shrink": "0" }}>
+                    Strength
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="2"
+                    step="0.05"
+                    value={lora.multiplier}
+                    onInput={(e) =>
+                      handleMultiplierChange(index(), parseFloat(e.currentTarget.value))
+                    }
+                    style={{ flex: "1", "min-width": "0" }}
+                  />
+                  <span style={{
                     "font-size": "12px",
-                    color: "var(--text-primary)",
-                    "min-width": "0",
-                    flex: "0 0 auto",
-                    "white-space": "nowrap",
-                    overflow: "hidden",
-                    "text-overflow": "ellipsis",
-                    "max-width": "140px",
-                  }}
-                >
-                  {shortName(lora.path)}
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="2"
-                  step="0.05"
-                  value={lora.multiplier}
-                  onInput={(e) =>
-                    handleMultiplierChange(index(), parseFloat(e.currentTarget.value))
-                  }
-                  style={{ flex: "1" }}
-                />
-                <span style={{ "font-size": "12px", "min-width": "32px", "text-align": "right" }}>
-                  {lora.multiplier.toFixed(2)}
-                </span>
-                <button
-                  onClick={() => handleRemove(index())}
-                  title="Remove LoRA"
-                  style={{
-                    padding: "2px 6px",
-                    background: "none",
-                    border: "1px solid var(--border)",
-                    "border-radius": "4px",
-                    color: "var(--text-muted)",
-                    cursor: "pointer",
-                    "font-size": "11px",
+                    "min-width": "32px",
+                    "text-align": "right",
+                    color: "var(--text-secondary)",
                     "flex-shrink": "0",
-                  }}
-                >
-                  ✕
-                </button>
+                  }}>
+                    {lora.multiplier.toFixed(2)}
+                  </span>
+                </div>
               </div>
             )}
           </For>
