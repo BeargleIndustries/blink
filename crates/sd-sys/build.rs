@@ -54,6 +54,15 @@ fn main() {
     }
     if use_cuda.is_some() {
         cmake_cfg.define("SD_CUDA", "ON");
+        // ggml defaults to "native" (the GPU present at build time). A CI
+        // runner has none, so a distributable build must name its targets,
+        // e.g. BLINK_CUDA_ARCHS="75-virtual;86-real;89-real;120-real".
+        if let Ok(archs) = env::var("BLINK_CUDA_ARCHS") {
+            if !archs.trim().is_empty() {
+                cmake_cfg.define("CMAKE_CUDA_ARCHITECTURES", archs.trim());
+                cmake_cfg.define("GGML_NATIVE", "OFF");
+            }
+        }
     }
     if use_vulkan.is_some() {
         cmake_cfg.define("SD_VULKAN", "ON");
@@ -217,6 +226,7 @@ fn main() {
         sd_cpp_dir.join("CMakeLists.txt").display()
     );
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
+    println!("cargo:rerun-if-env-changed=BLINK_CUDA_ARCHS");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
 }
 

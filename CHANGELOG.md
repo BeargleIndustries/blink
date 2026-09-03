@@ -57,7 +57,9 @@ a run of bugs the library tests could not see.
   takes effect once loading finishes.
 - The low-memory fallback below ~9 GB of free VRAM was validated by capping the budget
   on a 12 GB card, not on real 8/6/4 GB hardware.
-- Release installers are CPU (Windows, Linux) and Metal (macOS); CUDA builds are local.
+- Windows ships two installers: `-cuda-setup.exe` (NVIDIA GPU inference, CUDA runtime
+  bundled, needs an NVIDIA driver that supports CUDA 13, i.e. R580 or newer) and the plain
+  `-setup.exe` (CPU only). Linux installers are CPU only; macOS is Metal.
 
 ## v0.3.0 — 2026-03-14
 

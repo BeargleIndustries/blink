@@ -63,7 +63,7 @@ Dead-simple local AI image generation. Type a prompt, get an image. No Python. N
 - Windows 10+ / macOS 12+ / Linux (Ubuntu 22.04+)
 - 8 GB RAM minimum
 - GPU recommended:
-  - NVIDIA: GTX 1060+ with CUDA Toolkit 12+
+  - NVIDIA: GTX 1060+ with a driver that supports CUDA 13 (R580 or newer). The CUDA installer bundles the runtime, so no CUDA Toolkit install is needed.
   - Apple: M1+ (Metal)
   - AMD: Vulkan SDK
 - CPU-only mode available (significantly slower)
@@ -73,6 +73,16 @@ Dead-simple local AI image generation. Type a prompt, get an image. No Python. N
 ### Download Release
 
 Download the latest release from [Releases](../../releases).
+
+| Platform | Installer | Backend |
+|---|---|---|
+| Windows, NVIDIA GPU | `Blink_x.y.z_x64-cuda-setup.exe` (or the `-cuda.msi`) | CUDA (RTX 20 series and newer; RTX 30/40/50 native) |
+| Windows, no NVIDIA GPU | `Blink_x.y.z_x64-setup.exe` (or the `.msi`) | CPU |
+| macOS (Apple Silicon) | `.dmg` | Metal |
+| Linux | `.AppImage`, `.deb`, `.rpm` | CPU |
+
+The CUDA installer is larger (it carries the CUDA runtime and cuBLAS) and falls back to
+the CPU if no NVIDIA GPU is found.
 
 ### Build from Source
 

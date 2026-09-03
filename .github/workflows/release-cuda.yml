@@ -1,0 +1,117 @@
+name: Release (Windows CUDA)
+
+# Builds the Windows installer with the CUDA backend compiled in and the CUDA
+# runtime DLLs (cudart, cuBLAS, cuBLASLt) bundled next to Blink.exe, so users
+# with an NVIDIA GPU get GPU inference without installing the CUDA toolkit.
+# Runs on every release tag alongside the CPU/Metal release workflow, and can
+# be dispatched by hand to attach a CUDA installer to an existing release.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to upload the installer to (leave empty to only keep it as a workflow artifact)"
+        required: false
+        default: ""
+
+env:
+  CUDA_VERSION: "13.2.0"
+  # Turing as PTX (JIT on first run), RTX 30 / 40 / 50 as native device code.
+  BLINK_CUDA_ARCHS: "75-virtual;86-real;89-real;120-real"
+
+jobs:
+  windows-cuda:
+    name: Windows (CUDA)
+    runs-on: windows-latest
+    timeout-minutes: 240
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        id: cuda
+        with:
+          cuda: ${{ env.CUDA_VERSION }}
+          method: local
+          use-github-cache: false
+          use-local-cache: false
+          log-file-suffix: windows-cuda.txt
+
+      - name: MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install Ninja
+        run: choco install ninja --no-progress -y
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "."
+          key: cuda
+
+      - name: Stage CUDA runtime DLLs for bundling
+        shell: pwsh
+        run: |
+          $bin = Join-Path $env:CUDA_PATH "bin\x64"
+          if (-not (Test-Path $bin)) { $bin = Join-Path $env:CUDA_PATH "bin" }
+          New-Item -ItemType Directory -Force src-tauri\cuda-runtime | Out-Null
+          foreach ($n in @("cudart64_*.dll", "cublas64_*.dll", "cublasLt64_*.dll")) {
+            Get-ChildItem (Join-Path $bin $n) | Copy-Item -Destination src-tauri\cuda-runtime
+          }
+          Get-ChildItem src-tauri\cuda-runtime | Format-Table Name, Length
+
+      - name: Build (CUDA)
+        shell: pwsh
+        run: npx tauri build --features cuda --config src-tauri/tauri.cuda.conf.json --bundles nsis,msi
+
+      - name: Rename installers
+        id: rename
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-cuda | Out-Null
+          $setup = Get-ChildItem target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          $msi   = Get-ChildItem target\release\bundle\msi\*.msi | Select-Object -First 1
+          $setupOut = Join-Path dist-cuda ($setup.Name -replace '-setup\.exe$', '-cuda-setup.exe')
+          $msiOut   = Join-Path dist-cuda ($msi.Name -replace '\.msi$', '-cuda.msi')
+          Copy-Item $setup $setupOut
+          Copy-Item $msi $msiOut
+          Get-ChildItem dist-cuda | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB)}}
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blink-windows-cuda
+          path: dist-cuda/*
+          retention-days: 14
+
+      - name: Attach to GitHub release
+        if: github.event_name == 'push' || inputs.release_tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = if ($env:GITHUB_EVENT_NAME -eq 'push') { $env:GITHUB_REF_NAME } else { '${{ inputs.release_tag }}' }
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --draft --title "Blink $tag" --notes "See the [changelog](https://github.com/BeargleIndustries/blink/blob/master/CHANGELOG.md) for details."
+          }
+          gh release upload $tag (Get-ChildItem dist-cuda\* | ForEach-Object { $_.FullName }) --clobber

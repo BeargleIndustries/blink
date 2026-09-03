@@ -7,3 +7,7 @@ models/
 .omc/
 crates/sd-sys/stable-diffusion.cpp/build/
 src-tauri/gen/
+
+# CUDA runtime DLLs staged by the release-cuda workflow
+src-tauri/cuda-runtime/
+dist-cuda/
