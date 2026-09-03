@@ -212,8 +212,11 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
           <img
             src={props.previewImage!.startsWith("data:") ? props.previewImage! : `data:image/jpeg;base64,${props.previewImage}`}
             style={{
-              "max-width": "100%",
-              "max-height": "100%",
+              // Preview frames are latent-resolution (1/8 of the image, e.g.
+              // 64x128), so they must be scaled up to the canvas, not shown at
+              // their intrinsic size.
+              width: "100%",
+              height: "100%",
               "object-fit": "contain",
               opacity: "0.85",
             }}
@@ -268,7 +271,7 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
           </div>
         </Show>
 
-        <Show when={props.generating && !props.imageData && !props.inputImage}>
+        <Show when={props.generating && !props.imageData && !props.inputImage && !props.previewImage}>
           <div style={{
             "text-align": "center",
             color: "var(--text-secondary)",

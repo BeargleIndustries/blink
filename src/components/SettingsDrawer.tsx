@@ -1,4 +1,4 @@
-import { Component, Show, onMount, onCleanup, createSignal, createEffect } from "solid-js";
+import { Component, For, Show, onMount, onCleanup, createSignal, createEffect } from "solid-js";
 import type { PerfSettings, LoraConfig } from "../lib/types";
 import { listLocalLlmModels, type LocalLlmModel } from "../lib/tauri-api";
 import ToggleOption from "./ToggleOption";
@@ -37,6 +37,19 @@ interface SettingsDrawerProps {
   localLlmModel: string | null; onLocalLlmModelChange: (v: string | null) => void;
 }
 
+// Includes the 1:2 pairs Z-Image Turbo defaults to (see lib/defaults.ts).
+const SIZE_OPTIONS = [
+  "512x512",
+  "512x768",
+  "768x512",
+  "512x1024",
+  "1024x512",
+  "768x768",
+  "768x1024",
+  "1024x768",
+  "1024x1024",
+];
+
 const inputStyle = {
   padding: "4px 8px",
   background: "var(--bg-secondary)",
@@ -47,6 +60,11 @@ const inputStyle = {
   "font-size": "13px",
   outline: "none",
 } as const;
+
+// Merge in plain JS, not in JSX: Solid hoists literal keys of a JSX style
+// object into the static template and applies the spread at runtime, so
+// `style={{ ...inputStyle, width: "140px" }}` ends up 80px wide.
+const selectStyle = { ...inputStyle, width: "140px" } as const;
 
 const labelStyle = {
   "font-size": "12px",
@@ -74,6 +92,10 @@ const rowStyle = {
   gap: "8px",
   "margin-bottom": "8px",
 } as const;
+
+// Same reason as selectStyle: overrides must be merged here, not in JSX.
+const wideLabelStyle = { ...labelStyle, "min-width": "80px" } as const;
+const lastRowStyle = { ...rowStyle, "margin-bottom": "0" } as const;
 
 const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
   const [availableModels, setAvailableModels] = createSignal<LocalLlmModel[]>([]);
@@ -271,24 +293,27 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
                 props.onWidthChange(w);
                 props.onHeightChange(h);
               }}
-              style={{ ...inputStyle, width: "120px" }}
+              style={selectStyle}
             >
-              <option value="512x512">512×512</option>
-              <option value="512x768">512×768</option>
-              <option value="768x512">768×512</option>
-              <option value="768x768">768×768</option>
-              <option value="1024x1024">1024×1024</option>
-              <option value="1024x768">1024×768</option>
-              <option value="768x1024">768×1024</option>
+              {/* A size outside the list (a model default, or a value saved by an
+                  older build) still needs an entry, or the select renders blank. */}
+              <Show when={!SIZE_OPTIONS.includes(`${props.width}x${props.height}`)}>
+                <option value={`${props.width}x${props.height}`}>
+                  {props.width}×{props.height}
+                </option>
+              </Show>
+              <For each={SIZE_OPTIONS}>
+                {(size) => <option value={size}>{size.replace("x", "×")}</option>}
+              </For>
             </select>
           </div>
 
-          <div style={{ ...rowStyle, "margin-bottom": "0" }}>
+          <div style={lastRowStyle}>
             <span style={labelStyle}>Sampler</span>
             <select
               value={props.sampler}
               onChange={(e) => props.onSamplerChange(e.currentTarget.value)}
-              style={{ ...inputStyle, width: "120px" }}
+              style={selectStyle}
             >
               <option value="euler">Euler</option>
               <option value="euler_a">Euler A</option>
@@ -327,7 +352,7 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
           <div style={sectionStyle}>
             <div style={sectionHeadStyle}>Image Conditioning</div>
             <div style={{ display: "flex", "align-items": "center", gap: "8px" }}>
-              <span style={{ ...labelStyle, "min-width": "80px" }}>Img CFG</span>
+              <span style={wideLabelStyle}>Img CFG</span>
               <input
                 type="range"
                 min="0.5"

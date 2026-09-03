@@ -266,6 +266,8 @@ had not caught:
   logger. Now `eprintln!` like the other `[blink]` lines: observed
   `placement: auto_fit (10361 MiB usable >= 8320 MiB needed)`.
 
+- **Preview thumbnail and blank Size dropdown.** The projection preview rendered at its 64x128 intrinsic size; it now fills the canvas. The Size select had no entry for Z-Image's 512x1024 default so it showed blank; the list now includes the 1:2 pairs and falls back to an entry for any saved size. Along the way: Solid hoists literal keys of a JSX style object into the static template and applies the spread at runtime, so `style={{ ...inputStyle, width }}` never overrode the shared 80px. Merged at module level instead (four sites in the drawer).
+
 Checked and passing as shipped: the Settings drawer has one placement control
 ("Low-memory mode") and none of the six old toggles; the progress UI shows "Loading"
 before step 1 and never the word "tensor"; a 20-step generation is 14.4 s end to end.
