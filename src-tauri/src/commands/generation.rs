@@ -90,8 +90,24 @@ pub async fn generate_image(
 
     let app_handle = state.app_handle.clone();
 
+    // Reference-image editing only exists on models trained for it. sd.cpp does
+    // not check: a reference image on Z-Image Turbo selects its Omni pipeline
+    // and the process dies with an access violation (reproduced 2026-09-03).
+    // Refuse here with a real error instead. Keep in sync with
+    // src/lib/capabilities.ts, which decides what the UI offers.
+    const EDIT_ARCHITECTURES: &[&str] = &["flux-kontext"];
+    let wants_edit = request.ref_images.as_ref().is_some_and(|r| !r.is_empty());
+    let architecture = request.architecture.as_deref().unwrap_or("");
+    if wants_edit && !EDIT_ARCHITECTURES.contains(&architecture) {
+        state.generating.store(false, Ordering::SeqCst);
+        return Err(format!(
+            "This model ({}) can't edit from a reference image. Edit Mode needs an editing model such as Flux Kontext; use img2img instead.",
+            if architecture.is_empty() { "unknown architecture" } else { architecture }
+        ));
+    }
+
     // Z-Image applies LoRA 4x (sd.cpp issue #1071) — auto-compensate
-    let is_z_image = request.architecture.as_deref() == Some("z-image");
+    let is_z_image = architecture == "z-image";
     let lora_divisor = if is_z_image { 4.0 } else { 1.0 };
 
     let loras: Vec<LoraConfig> = request.loras.unwrap_or_default()

@@ -126,6 +126,29 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
     props.onClearImage();
   };
 
+  // Hand the displayed result to the app as a data URL input image. Results
+  // arrive as data URLs, bare base64, or asset URLs (gallery items).
+  const useAsInput = async () => {
+    const src = props.imageData;
+    if (!src) return;
+    if (src.startsWith("data:")) {
+      props.onImageDrop(src);
+      return;
+    }
+    if (!src.startsWith("asset://") && !src.startsWith("http")) {
+      props.onImageDrop(`data:image/png;base64,${src}`);
+      return;
+    }
+    try {
+      const blob = await (await fetch(src)).blob();
+      const reader = new FileReader();
+      reader.onload = () => props.onImageDrop(reader.result as string);
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error("Could not load image as input:", err);
+    }
+  };
+
   return (
     <div style={{ display: "flex", "flex-direction": "column", "align-items": "center", gap: "8px" }}>
       <div
@@ -303,6 +326,32 @@ const ImageCanvas: Component<ImageCanvasProps> = (props) => {
             onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
           >
             {showInfo() ? "▼ hide" : "▲ info"}
+          </button>
+
+          {/* Turn the result into the next input without the drag-it-onto-
+              itself trick, which was the only way to reach img2img/Edit Mode. */}
+          <button
+            onClick={useAsInput}
+            title="Use this image as the input for img2img or Edit Mode"
+            style={{
+              position: "absolute",
+              bottom: "0",
+              right: "8px",
+              background: "rgba(0,0,0,0.6)",
+              border: "none",
+              color: "rgba(255,255,255,0.8)",
+              padding: "3px 12px",
+              "border-radius": "8px 8px 0 0",
+              cursor: "pointer",
+              "font-size": "11px",
+              "letter-spacing": "0.03em",
+              "z-index": "7",
+              transition: "background 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.8)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(0,0,0,0.6)")}
+          >
+            ✎ Edit this image
           </button>
 
           <Show when={showInfo()}>

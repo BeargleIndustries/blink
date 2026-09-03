@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Edit Mode crashed the app on Z-Image.** Reference-image editing only works on models
+  trained for it (Flux Kontext); sd.cpp does not check, and a reference image on Z-Image
+  Turbo took down the process with an access violation. The backend now refuses with a
+  clear message, the UI only offers Edit Mode for editing models, and errors from the
+  generate command are shown in the app instead of only the console.
+- **"Edit this image" button** on generated results. Reaching img2img or Edit Mode
+  previously required dragging the result onto its own canvas.
+
 ## v0.4.0 — 2026-09-03
 
 Engine upgrade release: stable-diffusion.cpp moved forward six months (to `6b3edaa`),

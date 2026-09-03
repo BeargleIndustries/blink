@@ -271,6 +271,8 @@ had not caught:
 - **"Preserve Structure (Canny)" did nothing.** No code path ever set a ControlNet model path, and the generate command sent only a strength with no control image, so sd.cpp ignored the toggle entirely. Removed from Settings until it is wired for real: that needs a per-architecture ControlNet download (SD1.5/SDXL only in sd.cpp), Canny preprocessing of the input image (the wrapper already exposes `preprocess_canny`), and passing the result as `ControlNetInput` — the wrapper API slot is in place.
 - **Clippy clean.** All twelve workspace warnings resolved rather than allowed: three over-long signatures became structs (`GenerateInputs`, `ControlNetInput`, `SaveToGalleryMeta`, with the matching frontend change), a dead companion-size field that nothing read was removed, and the rest were mechanical.
 
+- **Edit Mode crashed on Z-Image.** Reported after v0.4.0 and reproduced through the debug port: a reference image on Z-Image Turbo makes sd.cpp pick its Omni pipeline and die with STATUS_ACCESS_VIOLATION. Blink now gates Edit Mode on `EDIT_ARCHITECTURES` (`src/lib/capabilities.ts`, mirrored in the generate command) and adds an "Edit this image" button. Kontext itself is untested on this machine (no Kontext model downloaded); Z-Image Omni / Qwen-Image-Edit can join the list once verified.
+
 Checked and passing as shipped: the Settings drawer has one placement control
 ("Low-memory mode") and none of the six old toggles; the progress UI shows "Loading"
 before step 1 and never the word "tensor"; a 20-step generation is 14.4 s end to end.

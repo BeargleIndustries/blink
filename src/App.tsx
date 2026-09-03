@@ -28,6 +28,7 @@ import {
   setEnhanceProvider,
 } from "./lib/tauri-api";
 import { getDefaultsForModel } from "./lib/defaults";
+import { supportsEdit } from "./lib/capabilities";
 
 import PromptBar from "./components/PromptBar";
 import ImageCanvas, { ImageCanvasAPI } from "./components/ImageCanvas";
@@ -129,6 +130,12 @@ const App: Component = () => {
   };
 
   const activeModel = () => models().find((m) => m.active) ?? null;
+  // Reference-image editing is only offered for models that support it; sending
+  // a reference image to any other model crashes sd.cpp (see lib/capabilities).
+  const canEdit = () => supportsEdit(activeModel()?.architecture);
+  createEffect(() => {
+    if (!canEdit()) setEditMode(false);
+  });
   // The model the progress bar is talking about: during a switch that is the one
   // being loaded, which is not yet the active one.
   const progressModel = () => {
@@ -354,6 +361,10 @@ const App: Component = () => {
     } catch (err) {
       setGenerating(false);
       console.error("Generate failed:", err);
+      // Backend refusals (e.g. Edit Mode on a model that can't edit) were only
+      // reaching the console; show them where the user is looking.
+      setErrorMessage(String(err));
+      setTimeout(() => setErrorMessage(null), 8000);
     }
   };
 
@@ -686,25 +697,34 @@ const App: Component = () => {
             >
               img2img
             </button>
-            <button
-              onClick={() => setEditMode(true)}
-              style={{
-                padding: "4px 12px",
-                background: editMode() ? "var(--accent)" : "var(--bg-tertiary)",
-                border: `1px solid ${editMode() ? "var(--accent)" : "var(--border)"}`,
-                "border-radius": "var(--radius)",
-                color: editMode() ? "#fff" : "var(--text-secondary)",
-                cursor: "pointer",
-                "font-size": "12px",
-                transition: "all 0.15s",
-              }}
+            <Show
+              when={canEdit()}
+              fallback={
+                <span style={{ "font-size": "11px", color: "var(--text-muted)", opacity: "0.6" }}>
+                  Edit Mode needs an editing model (Flux Kontext)
+                </span>
+              }
             >
-              Edit Mode
-            </button>
-            <Show when={editMode()}>
-              <span style={{ "font-size": "11px", color: "var(--text-muted)", opacity: "0.6" }}>
-                Kontext — describe the edit
-              </span>
+              <button
+                onClick={() => setEditMode(true)}
+                style={{
+                  padding: "4px 12px",
+                  background: editMode() ? "var(--accent)" : "var(--bg-tertiary)",
+                  border: `1px solid ${editMode() ? "var(--accent)" : "var(--border)"}`,
+                  "border-radius": "var(--radius)",
+                  color: editMode() ? "#fff" : "var(--text-secondary)",
+                  cursor: "pointer",
+                  "font-size": "12px",
+                  transition: "all 0.15s",
+                }}
+              >
+                Edit Mode
+              </button>
+              <Show when={editMode()}>
+                <span style={{ "font-size": "11px", color: "var(--text-muted)", opacity: "0.6" }}>
+                  Kontext — describe the edit
+                </span>
+              </Show>
             </Show>
           </div>
         </Show>
