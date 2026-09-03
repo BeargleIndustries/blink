@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 use crate::error::SdError;
-use crate::ffi_bridge::{SdCppContext, PreviewCallback};
+use crate::ffi_bridge::{CancelHandle, SdCppContext, PreviewCallback};
 use crate::types::*;
 use crate::progress::ProgressCallback;
 use crate::video::{self, VideoGenParams};
@@ -38,15 +38,24 @@ pub struct SdContext {
     model_path: Option<String>,
     command_tx: mpsc::Sender<InferenceCommand>,
     cancel_flag: Arc<AtomicBool>,
+    cancel_handle: Arc<CancelHandle>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
 impl SdContext {
     pub fn new(config: ContextConfig) -> Result<Self, SdError> {
-        Self::with_cancel_flag(config, Arc::new(AtomicBool::new(false)))
+        Self::with_cancel_flag(
+            config,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(CancelHandle::new()),
+        )
     }
 
-    pub fn with_cancel_flag(config: ContextConfig, cancel_flag: Arc<AtomicBool>) -> Result<Self, SdError> {
+    pub fn with_cancel_flag(
+        config: ContextConfig,
+        cancel_flag: Arc<AtomicBool>,
+        cancel_handle: Arc<CancelHandle>,
+    ) -> Result<Self, SdError> {
         let model_path = config.model_path.clone();
 
         // Validate that at least one model path is provided
@@ -73,6 +82,7 @@ impl SdContext {
 
         let thread_config = config.clone();
         let thread_cancel = cancel_flag.clone();
+        let thread_cancel_handle = Arc::clone(&cancel_handle);
 
         let handle = thread::Builder::new()
             .name("sd-inference".into())
@@ -83,7 +93,7 @@ impl SdContext {
                 eprintln!("[blink] Inference thread started, loading model: {}", model_display);
 
                 // Initialize sd.cpp context (loads the model)
-                let cpp_ctx = match SdCppContext::new(&thread_config) {
+                let cpp_ctx = match SdCppContext::new(&thread_config, &thread_cancel_handle) {
                     Ok(ctx) => {
                         eprintln!("[blink] Model loaded successfully");
                         let _ = load_tx.send(Ok(()));
@@ -100,7 +110,11 @@ impl SdContext {
                     match cmd {
                         InferenceCommand::Txt2Img { params, ref_images, progress_cb, preview_cb, result_tx } => {
                             log::info!("Starting txt2img: {}x{}, {} steps", params.width, params.height, params.steps);
-                            thread_cancel.store(false, Ordering::SeqCst);
+                            // NB: the cancel flag is deliberately NOT reset here.
+                            // Resetting on dequeue erased a cancel issued between
+                            // txt2img() returning and this thread picking the
+                            // command up. The reset now happens on the caller's
+                            // thread, before the send.
                             let ref_imgs_opt = if ref_images.is_empty() { None } else { Some(ref_images.as_slice()) };
                             let result = cpp_ctx.generate(
                                 &params,
@@ -117,7 +131,7 @@ impl SdContext {
                             let _ = result_tx.send(result);
                         }
                         InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx } => {
-                            thread_cancel.store(false, Ordering::SeqCst);
+                            // See the note in Txt2Img: no reset on dequeue.
                             let result = cpp_ctx.generate(
                                 &params.base,
                                 Some(&input_image),
@@ -133,7 +147,7 @@ impl SdContext {
                             let _ = result_tx.send(result);
                         }
                         InferenceCommand::VideoGen { params, progress_cb, result_tx } => {
-                            thread_cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+                            // See the note in Txt2Img: no reset on dequeue.
                             let result = video::generate_video(&cpp_ctx, &params, progress_cb, &thread_cancel);
                             let _ = result_tx.send(result);
                         }
@@ -175,6 +189,7 @@ impl SdContext {
             model_path,
             command_tx,
             cancel_flag,
+            cancel_handle,
             thread: Some(handle),
         })
     }
@@ -186,6 +201,13 @@ impl SdContext {
         progress_cb: Option<ProgressCallback>,
         preview_cb: Option<PreviewCallback>,
     ) -> Result<GeneratedImage, SdError> {
+        // Clear the cancel flag here, on the caller's thread, before the command
+        // is queued. This is the only point at which "the user has asked for a
+        // NEW generation" is actually known. It used to happen on dequeue, which
+        // erased any cancel issued in between; without it here, a consumer that
+        // cancels once leaves the flag latched forever and every later generation
+        // dies at the pre-flight check.
+        self.cancel_flag.store(false, Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
             .send(InferenceCommand::Txt2Img { params, ref_images, progress_cb, preview_cb, result_tx })
@@ -213,6 +235,8 @@ impl SdContext {
         progress_cb: Option<ProgressCallback>,
         preview_cb: Option<PreviewCallback>,
     ) -> Result<GeneratedImage, SdError> {
+        // See txt2img: the reset belongs on the caller's thread, before the send.
+        self.cancel_flag.store(false, Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
             .send(InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx })
@@ -235,6 +259,8 @@ impl SdContext {
         params: VideoGenParams,
         progress_cb: Option<ProgressCallback>,
     ) -> Result<Vec<crate::types::GeneratedImage>, SdError> {
+        // See txt2img: the reset belongs on the caller's thread, before the send.
+        self.cancel_flag.store(false, Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
             .send(InferenceCommand::VideoGen { params, progress_cb, result_tx })
@@ -252,8 +278,24 @@ impl SdContext {
         })?
     }
 
+    /// Cancel the running (or queued) generation.
+    ///
+    /// Both halves are needed and neither replaces the other. The `AtomicBool`
+    /// is what the two pre-flight checks and the result mapping read, and it is
+    /// the only signal the video path has. The native call is what stops sampling
+    /// mid-step instead of at the end of the generation.
+    ///
+    /// It cannot interrupt a model load: `model_loader.cpp` has no
+    /// `get_cancel_flag()` call sites at all, so a cancel pressed while weights
+    /// are being read takes effect at the first sampling step afterwards.
     pub fn cancel(&self) {
-        self.cancel_flag.store(true, Ordering::SeqCst);
+        self.cancel_flag.store(true, Ordering::SeqCst);  // pre-flight + result mapping
+        self.cancel_handle.cancel();                     // native, mid-step
+    }
+
+    /// The handle a UI thread can hold to cancel without locking the context.
+    pub fn cancel_handle(&self) -> Arc<CancelHandle> {
+        Arc::clone(&self.cancel_handle)
     }
 
     pub fn model_path(&self) -> Option<&str> {

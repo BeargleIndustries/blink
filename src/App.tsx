@@ -77,6 +77,9 @@ const App: Component = () => {
     low_memory: false,
   });
 
+  // Shown between pressing Cancel and the backend confirming it stopped.
+  const [cancelNotice, setCancelNotice] = createSignal<string | null>(null);
+
   // Generation settings
   const [steps, setSteps] = createSignal(20);
   const [cfgScale, setCfgScale] = createSignal(7.0);
@@ -250,6 +253,7 @@ const App: Component = () => {
         setCurrentStep(0);
         setTotalSteps(0);
         setElapsed(0);
+        setCancelNotice(null);
       }),
 
       listen<FileDownloadProgress>("model:download_file_start", (event) => {
@@ -335,12 +339,20 @@ const App: Component = () => {
 
   const handleCancel = async () => {
     try {
+      // sd.cpp's native cancel takes effect at its next check point, which is the
+      // next sampling step — it cannot interrupt a model load, because
+      // model_loader.cpp never reads the cancel flag. Say so rather than implying
+      // the work stopped instantly.
+      // TODO(item 3): read phase — when the phase signal lands, say
+      // "Cancelling — will stop once the model finishes loading" while loading.
+      setCancelNotice("Cancelling — this will stop at the next sampling step; it cannot interrupt a model load");
       await cancelGeneration();
       setGenerating(false);
       setCurrentStep(0);
       setTotalSteps(0);
       setElapsed(0);
     } catch (err) {
+      setCancelNotice(null);
       console.error("Cancel failed:", err);
     }
   };
@@ -686,6 +698,17 @@ const App: Component = () => {
             "font-size": "13px",
           }}>
             {errorMessage()}
+          </div>
+        </Show>
+
+        <Show when={cancelNotice()}>
+          <div style={{
+            padding: "8px 12px",
+            "border-radius": "6px",
+            color: "var(--text-secondary)",
+            "font-size": "13px",
+          }}>
+            {cancelNotice()}
           </div>
         </Show>
 

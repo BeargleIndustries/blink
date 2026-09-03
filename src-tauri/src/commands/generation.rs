@@ -230,6 +230,11 @@ pub async fn cancel_generation(
 ) -> Result<(), String> {
     // Shared AtomicBool flag — SdContext uses the same Arc, no mutex needed
     state.cancel_flag.store(true, Ordering::SeqCst);
+    // Native sd.cpp cancel, so sampling stops inside the current step rather than
+    // at the end of the generation. Goes through the shared Arc<CancelHandle> and
+    // never touches state.sd_context — the generation command holds that mutex for
+    // the whole generation, so locking it here would deadlock.
+    state.cancel_handle.cancel();
     state.generating.store(false, Ordering::SeqCst);
     Ok(())
 }

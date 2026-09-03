@@ -10,7 +10,7 @@ pub mod video;
 
 pub use context::{SdContext, InferenceCommand};
 pub use error::SdError;
-pub use ffi_bridge::{PreviewCallback, preprocess_canny};
+pub use ffi_bridge::{CancelHandle, PreviewCallback, preprocess_canny};
 pub use generation::{generate_txt2img, generate_img2img};
 pub use gpu::GpuBackend;
 pub use progress::ProgressUpdate;

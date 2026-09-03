@@ -5,6 +5,7 @@
 
 use std::ffi::{c_int, c_void, CString};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::error::SdError;
 use crate::progress::{ProgressCallback, ProgressUpdate};
@@ -14,10 +15,95 @@ use crate::types::*;
 /// Arguments: step, RGBA pixel data, width, height
 pub type PreviewCallback = Box<dyn Fn(i32, Vec<u8>, u32, u32) + Send>;
 
+/// The raw context pointer, made `Send` so a cancel issued from the UI thread can
+/// reach it. It is never dereferenced by Rust — only handed back to sd.cpp.
+struct CtxPtr(*mut sd_sys::sd_ctx_t);
+unsafe impl Send for CtxPtr {}
+
+/// Lets a thread other than the inference thread call sd.cpp's native cancel
+/// without racing `free_sd_ctx`.
+///
+/// `sd_cancel_generation` is safe to call cross-thread: its whole body is a null
+/// check, a range clamp and a release-store into a lock-free atomic
+/// (`stable-diffusion.cpp:3893`, flag declared `:290`). The only hazard is the
+/// context being freed underneath it, and the mutex closes exactly that: `clear()`
+/// runs before `free_sd_ctx` and cannot acquire the lock while a cancel is in
+/// flight, so a freed pointer is never visible to `cancel()`. Holding the lock
+/// across the FFI call is cheap and cannot deadlock — a single atomic store
+/// neither blocks nor re-enters.
+///
+/// There is deliberately no per-generation `reset()`: `generate_image` already
+/// clears sd.cpp's flag itself at `stable-diffusion.cpp:5644`, so issuing
+/// `SD_CANCEL_RESET` here would be dead code. `pending` is the only state Blink
+/// owns, and it is cleared only in `set()`.
+pub struct CancelHandle {
+    /// `None` before `new_sd_ctx` returns and after the context is freed.
+    ctx: Mutex<Option<CtxPtr>>,
+    /// A cancel that arrived before the context existed, replayed by `set()`.
+    pending: AtomicBool,
+}
+
+impl CancelHandle {
+    pub fn new() -> Self {
+        Self {
+            ctx: Mutex::new(None),
+            pending: AtomicBool::new(false),
+        }
+    }
+
+    /// Publish the context pointer. Called on the inference thread immediately
+    /// after a successful `new_sd_ctx`. Replays a cancel that arrived first.
+    fn set(&self, ptr: *mut sd_sys::sd_ctx_t) {
+        let mut guard = match self.ctx.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = Some(CtxPtr(ptr));
+        if self.pending.swap(false, Ordering::SeqCst) {
+            log::info!("Replaying a cancel that arrived before the model finished loading");
+            unsafe { sd_sys::sd_cancel_generation(ptr, sd_sys::sd_cancel_mode_t_SD_CANCEL_ALL) };
+        }
+    }
+
+    /// Retract the pointer. Called on the inference thread *before* `free_sd_ctx`.
+    fn clear(&self) {
+        let mut guard = match self.ctx.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *guard = None;
+    }
+
+    /// Ask sd.cpp to stop at its next check point. Safe from any thread.
+    ///
+    /// This cannot abort a model load: every `get_cancel_flag()` call site is in
+    /// the generate/decode paths and `model_loader.cpp` has none, so a cancel
+    /// issued during loading takes effect at the first sampling step instead.
+    pub fn cancel(&self) {
+        let guard = match self.ctx.lock() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        match guard.as_ref() {
+            Some(p) => unsafe {
+                sd_sys::sd_cancel_generation(p.0, sd_sys::sd_cancel_mode_t_SD_CANCEL_ALL)
+            },
+            None => self.pending.store(true, Ordering::SeqCst),
+        }
+    }
+}
+
+impl Default for CancelHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Thin owning wrapper around `*mut sd_sys::sd_ctx_t`.
 /// Freed on drop via `sd_sys::free_sd_ctx`.
 pub(crate) struct SdCppContext {
     ctx: *mut sd_sys::sd_ctx_t,
+    cancel_handle: Arc<CancelHandle>,
 }
 
 // sd_ctx_t is internally synchronized by sd.cpp (single-threaded use from our
@@ -32,7 +118,14 @@ impl SdCppContext {
     }
 
         /// Load a model and create the sd.cpp context.
-    pub(crate) fn new(config: &ContextConfig) -> Result<Self, SdError> {
+    ///
+    /// `cancel_handle` is published as soon as `new_sd_ctx` returns, so a cancel
+    /// pressed during the load is replayed against the fresh context rather than
+    /// dropped.
+    pub(crate) fn new(
+        config: &ContextConfig,
+        cancel_handle: &Arc<CancelHandle>,
+    ) -> Result<Self, SdError> {
         // Validate that at least one model path is provided
         if config.model_path.is_none() && config.diffusion_model_path.is_none() {
             return Err(SdError::InvalidParams {
@@ -196,7 +289,14 @@ impl SdCppContext {
                 });
             }
 
-            Ok(Self { ctx })
+            // Publish before returning: a cancel pressed during the load is
+            // parked in `pending` and replayed here.
+            cancel_handle.set(ctx);
+
+            Ok(Self {
+                ctx,
+                cancel_handle: Arc::clone(cancel_handle),
+            })
         }
     }
 
@@ -381,6 +481,26 @@ impl SdCppContext {
                 );
             }
 
+            // Callback teardown, shared by the cancel path below and the normal
+            // path after generate_image, so the two cannot drift apart. Order is
+            // load-bearing: clear first so sd.cpp can no longer call into the
+            // boxes, then reclaim them.
+            let teardown = || {
+                sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
+                let _ = Box::from_raw(trampoline_ptr);
+                if !preview_trampoline_ptr.is_null() {
+                    sd_sys::sd_set_preview_callback(
+                        None,
+                        sd_sys::preview_t_PREVIEW_NONE,
+                        0,
+                        false,
+                        false,
+                        std::ptr::null_mut(),
+                    );
+                    let _ = Box::from_raw(preview_trampoline_ptr);
+                }
+            };
+
             // Build generation params
             let mut gen_params: sd_sys::sd_img_gen_params_t = std::mem::zeroed();
             sd_sys::sd_img_gen_params_init(&mut gen_params);
@@ -476,6 +596,30 @@ impl SdCppContext {
                 gen_params.strength = 0.0;
             }
 
+            // Test-only: widen the pre-flight window so a cancel can be delivered
+            // deterministically instead of raced. `debug_assertions` (not
+            // `cfg(test)`, which would not apply to this library crate when the
+            // integration test runs) keeps it out of release builds entirely,
+            // while `cargo test`'s dev profile still exercises it.
+            #[cfg(debug_assertions)]
+            if let Ok(ms) = std::env::var("BLINK_TEST_PREFLIGHT_DELAY_MS") {
+                if let Ok(ms) = ms.parse::<u64>() {
+                    std::thread::sleep(std::time::Duration::from_millis(ms));
+                }
+            }
+
+            // Second cancel read, immediately before handing control to sd.cpp.
+            // Everything since the pre-flight check at the top of generate() — the
+            // Lanczos resize, the LoRA CString build, the mask allocation — is a
+            // window in which a cancel would otherwise be silently discarded by
+            // generate_image's own reset_cancel_flag() (stable-diffusion.cpp:5644)
+            // and the user would receive an image they asked not to have.
+            if cancel_flag.load(Ordering::SeqCst) {
+                log::info!("Cancelled before generate_image; tearing down callbacks");
+                teardown();
+                return Err(SdError::Cancelled);
+            }
+
             log::info!(
                 "Calling generate_image: prompt='{}', {}x{}, {} steps, seed={}",
                 params.prompt,
@@ -496,18 +640,17 @@ impl SdCppContext {
             );
 
             // Clear callbacks immediately, then reclaim the boxed trampoline data.
-            // Must happen in this order: clear first so sd.cpp can no longer call into it,
-            // then drop the box.
-            sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
-            let _ = Box::from_raw(trampoline_ptr);
-            if !preview_trampoline_ptr.is_null() {
-                sd_sys::sd_set_preview_callback(None, sd_sys::preview_t_PREVIEW_NONE, 0, false, false, std::ptr::null_mut());
-                let _ = Box::from_raw(preview_trampoline_ptr);
-            }
+            teardown();
 
             if !ok || result_ptr.is_null() || num_images_out <= 0 {
                 if !result_ptr.is_null() {
                     sd_sys::free_sd_images(result_ptr, num_images_out);
+                }
+                // generate_image returns false on cancel (stable-diffusion.cpp:5687,
+                // "cancelling generation"). Without this the user is told
+                // "inference returned null" for something they asked for.
+                if cancel_flag.load(Ordering::SeqCst) {
+                    return Err(SdError::Cancelled);
                 }
                 return Err(SdError::InferenceReturnedNull);
             }
@@ -577,6 +720,10 @@ impl SdCppContext {
 
 impl Drop for SdCppContext {
     fn drop(&mut self) {
+        // Retract the pointer BEFORE freeing it. `clear()` blocks until any
+        // in-flight `cancel()` has released the lock, so sd.cpp can never be
+        // handed a freed context.
+        self.cancel_handle.clear();
         if !self.ctx.is_null() {
             log::info!("Freeing sd.cpp context");
             unsafe {
@@ -797,6 +944,33 @@ mod tests {
         assert_eq!(SampleMethod::Lcm.to_c(), sd_sys::sample_method_t_LCM_SAMPLE_METHOD);
     }
 
+    // -- CancelHandle --
+    //
+    // These exercise the states that do NOT touch FFI. A handle whose `ctx` is
+    // `None` never calls sd.cpp, so both tests are pure Rust and run on CI.
+
+    #[test]
+    fn cancel_handle_records_pending_before_ctx_is_set() {
+        let handle = CancelHandle::new();
+        // No context yet — the cancel must be parked, not dropped.
+        handle.cancel();
+        assert!(
+            handle.pending.load(Ordering::SeqCst),
+            "a cancel issued before new_sd_ctx returned must be remembered"
+        );
+    }
+
+    #[test]
+    fn cancel_handle_is_inert_after_clear() {
+        let handle = CancelHandle::new();
+        handle.clear();
+        // clear() leaves ctx None, so this parks rather than dereferencing a
+        // freed pointer. The point is that it does not crash and does not call in.
+        handle.cancel();
+        assert!(handle.ctx.lock().unwrap().is_none());
+        assert!(handle.pending.load(Ordering::SeqCst));
+    }
+
     // -- ContextConfig with missing model returns ModelNotFound --
 
     #[test]
@@ -818,7 +992,8 @@ mod tests {
         // Match on the Result directly rather than calling unwrap_err(): that
         // requires the Ok type to implement Debug, and SdCppContext deliberately
         // does not (it wraps a raw sd_ctx_t pointer).
-        match SdCppContext::new(&config) {
+        let handle = Arc::new(CancelHandle::new());
+        match SdCppContext::new(&config, &handle) {
             Err(SdError::ModelNotFound { path }) => assert!(path.contains("nonexistent")),
             Err(other) => panic!("Expected ModelNotFound, got: {:?}", other),
             Ok(_) => panic!("Expected ModelNotFound, got a context"),

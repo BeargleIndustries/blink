@@ -506,3 +506,265 @@ fn lora_strength_probe() {
         .expect("save failed");
     eprintln!("[probe] images written to {}", std::env::temp_dir().display());
 }
+
+// ---------------------------------------------------------------------------
+// Cancellation (item 4)
+// ---------------------------------------------------------------------------
+//
+// These four tests cover the two windows in which Blink used to discard a cancel
+// and hand the user a picture they had asked not to have:
+//
+//   * between `txt2img()` sending the command and the inference thread dequeuing
+//     it — erased by the old `thread_cancel.store(false, …)` on dequeue;
+//   * between the pre-flight check at the top of `SdCppContext::generate` and the
+//     `generate_image` call — erased by sd.cpp's own `reset_cancel_flag()`
+//     (`stable-diffusion.cpp:5644`).
+//
+// The second window is widened deterministically by `BLINK_TEST_PREFLIGHT_DELAY_MS`
+// (a `#[cfg(debug_assertions)]` hook in `ffi_bridge.rs`), so none of these is a race.
+// Run them with `--test-threads=1`: they set and clear that variable, and the
+// process-wide environment is not test-local.
+
+/// The reference Z-Image Turbo Q8 stack, with `auto_fit` placement (item 2's default).
+fn zimage_cancel_context() -> sd_wrapper::SdContext {
+    use sd_wrapper::{ContextConfig, LoraApplyMode, SdContext};
+
+    let dir = model_dir();
+    let diffusion = dir.join("z-image").join("z_image_turbo-Q8_0.gguf");
+    let llm = dir.join("z-image").join("Qwen3-4B-Instruct-2507-Q4_K_M.gguf");
+    let vae = dir.join("z-image").join("ae.safetensors");
+
+    for (label, path) in [("diffusion", &diffusion), ("llm", &llm), ("vae", &vae)] {
+        assert!(
+            path.exists(),
+            "missing {label} model at {}. Set BLINK_TEST_MODEL_DIR to override.",
+            path.display()
+        );
+    }
+
+    SdContext::new(ContextConfig {
+        model_path: None,
+        vae_path: Some(vae.to_string_lossy().into_owned()),
+        clip_l_path: None,
+        t5xxl_path: None,
+        diffusion_model_path: Some(diffusion.to_string_lossy().into_owned()),
+        llm_path: Some(llm.to_string_lossy().into_owned()),
+        n_threads: 4,
+        auto_fit: true,
+        low_memory: false,
+        control_net_path: None,
+        taesd_path: None,
+        lora_apply_mode: LoraApplyMode::Auto,
+    })
+    .expect("failed to create sd.cpp context")
+}
+
+fn zimage_cancel_params(steps: u32, seed: i64) -> sd_wrapper::GenerationParams {
+    use sd_wrapper::{GenerationParams, SampleMethod};
+    GenerationParams {
+        prompt: "a red apple on a wooden table, studio lighting".to_string(),
+        width: 512,
+        height: 512,
+        steps,
+        cfg_scale: 1.0,
+        seed,
+        sample_method: SampleMethod::Euler,
+        ..Default::default()
+    }
+}
+
+/// A cancel that arrives while a command is still sitting in the queue must
+/// survive until the inference thread dequeues it.
+///
+/// This is the regression test for the removal of `thread_cancel.store(false, …)`
+/// at the three dequeue sites in `context.rs`. It is made deterministic rather
+/// than raced: generation 1 is parked inside the widened pre-flight window, so
+/// generation 2 is provably still queued when the cancel is issued.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn cancel_before_dequeue_produces_no_image() {
+    use sd_wrapper::SdError;
+
+    std::env::set_var("BLINK_TEST_PREFLIGHT_DELAY_MS", "5000");
+    let ctx = zimage_cancel_context();
+    let ctx = &ctx;
+
+    let first = zimage_cancel_params(4, 42);
+    let second = zimage_cancel_params(4, 43);
+
+    let (r1, r2) = std::thread::scope(|s| {
+        let a = s.spawn(move || ctx.txt2img(first, Vec::new(), None, None));
+        // Generation 1 is now past its pre-flight check and inside the 5 s pause.
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        let b = s.spawn(move || ctx.txt2img(second, Vec::new(), None, None));
+        // Generation 2's command has been sent and cannot be dequeued until
+        // generation 1 returns, so the cancel below lands while it is queued.
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+        ctx.cancel();
+        (a.join().unwrap(), b.join().unwrap())
+    });
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+
+    assert!(
+        matches!(r2, Err(SdError::Cancelled)),
+        "a cancel issued while the command was queued must survive to the \
+         pre-flight check, got: {r2:?}"
+    );
+    assert!(
+        matches!(r1, Err(SdError::Cancelled)),
+        "the in-flight generation must also report Cancelled, got: {r1:?}"
+    );
+}
+
+/// A cancel that arrives after the pre-flight check but before `generate_image`
+/// must not be swallowed by sd.cpp's `reset_cancel_flag()` at `:5644`.
+///
+/// This is the regression test for the second `cancel_flag.load()` immediately
+/// before the `generate_image` call.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn cancel_during_preflight_window_produces_no_image() {
+    use sd_wrapper::SdError;
+
+    std::env::set_var("BLINK_TEST_PREFLIGHT_DELAY_MS", "4000");
+    let ctx = zimage_cancel_context();
+    let ctx = &ctx;
+
+    let result = std::thread::scope(|s| {
+        s.spawn(move || {
+            // The pre-flight check runs within microseconds of the send, so by
+            // now the generation is provably inside the widened window.
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            ctx.cancel();
+        });
+        ctx.txt2img(zimage_cancel_params(4, 42), Vec::new(), None, None)
+    });
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+
+    assert!(
+        matches!(result, Err(SdError::Cancelled)),
+        "a cancel inside the pre-flight window must yield Cancelled and no image, \
+         got: {result:?}"
+    );
+}
+
+/// Native cancellation stops sampling inside a step instead of at the end of the
+/// generation.
+///
+/// The uncancelled run is measured first, in the same process and on the same
+/// context, so the comparison is warm-against-warm.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn native_cancel_stops_mid_generation() {
+    use sd_wrapper::SdError;
+
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+    let ctx = zimage_cancel_context();
+    let ctx = &ctx;
+
+    // Enough steps that "stops mid-generation" is measurable rather than noise.
+    const STEPS: u32 = 12;
+
+    let t0 = std::time::Instant::now();
+    ctx.txt2img(zimage_cancel_params(STEPS, 42), Vec::new(), None, None)
+        .expect("baseline generation failed");
+    let uncancelled = t0.elapsed();
+    eprintln!("[cancel] uncancelled {STEPS}-step run: {uncancelled:?}");
+
+    let t1 = std::time::Instant::now();
+    let result = std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            ctx.cancel();
+        });
+        ctx.txt2img(zimage_cancel_params(STEPS, 43), Vec::new(), None, None)
+    });
+    let cancelled = t1.elapsed();
+    eprintln!("[cancel] cancelled run returned after {cancelled:?}");
+
+    assert!(
+        matches!(result, Err(SdError::Cancelled)),
+        "cancel during sampling must yield Cancelled, got: {result:?}"
+    );
+    assert!(
+        cancelled.as_secs_f64() < 0.75 * uncancelled.as_secs_f64(),
+        "cancel did not take effect mid-generation: cancelled={cancelled:?} vs \
+         uncancelled={uncancelled:?}"
+    );
+}
+
+/// A generation started after a cancelled one completes normally.
+///
+/// Self-contained on purpose: it issues its own cancel rather than relying on a
+/// preceding test having left the flag set, so it keeps working under `--exact`,
+/// a rename, or a solo run. It is the guard for the caller-side
+/// `cancel_flag.store(false, …)` at the top of `SdContext::txt2img` — without
+/// that, the pre-flight check kills this generation immediately.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn generation_after_cancel_succeeds() {
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+    let ctx = zimage_cancel_context();
+
+    // Latch both halves of the cancel with nothing in flight.
+    ctx.cancel();
+
+    let image = ctx
+        .txt2img(zimage_cancel_params(4, 42), Vec::new(), None, None)
+        .expect("a generation started after a cancel must succeed");
+
+    assert_eq!(image.width, 512);
+    assert_eq!(image.height, 512);
+    if let Some(reason) = degeneracy_reason(&image.data, image.width, image.height) {
+        panic!("generation after cancel produced a degenerate image: {reason}");
+    }
+}
+
+/// Cancelling and immediately switching models must not crash.
+///
+/// This is the use-after-free guard: `SdCppContext::drop` calls
+/// `CancelHandle::clear()` before `free_sd_ctx`, and `clear()` cannot take the
+/// mutex while a `cancel()` is inside the FFI call, so sd.cpp is never handed a
+/// freed context. The test drives that race directly — a thread hammers `cancel()`
+/// on the handle while the context is torn down — and then proves the engine is
+/// still usable by loading a second context and generating.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn cancel_during_model_switch_does_not_crash() {
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+
+    let first = zimage_cancel_context();
+    let handle = first.cancel_handle();
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stop_writer = std::sync::Arc::clone(&stop);
+    let hammer = std::thread::spawn(move || {
+        let mut issued = 0u32;
+        while !stop_writer.load(std::sync::atomic::Ordering::SeqCst) {
+            handle.cancel();
+            issued += 1;
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        issued
+    });
+
+    // Tear the context down underneath the cancels — this is the "switch models"
+    // half of the scenario.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    drop(first);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    let issued = hammer.join().expect("the cancel thread panicked");
+    eprintln!("[cancel] issued {issued} cancels across the teardown");
+    assert!(issued > 1, "the cancel thread did not actually race the teardown");
+
+    // The replacement context gets its own handle, so the old pending cancel
+    // cannot leak into it.
+    let second = zimage_cancel_context();
+    let image = second
+        .txt2img(zimage_cancel_params(4, 42), Vec::new(), None, None)
+        .expect("generation after a cancelled model switch must succeed");
+    if let Some(reason) = degeneracy_reason(&image.data, image.width, image.height) {
+        panic!("post-switch generation produced a degenerate image: {reason}");
+    }
+}

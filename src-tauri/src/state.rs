@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
-use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode};
+use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode, CancelHandle};
 use serde::{Deserialize, Serialize};
 
 /// The user's only remaining placement choice. Everything else sd.cpp decides
@@ -23,6 +23,10 @@ pub struct PerfSettings {
 pub struct AppState {
     pub app_handle: AppHandle,
     pub cancel_flag: Arc<AtomicBool>,
+    /// Native sd.cpp cancellation. Owned here, alongside `cancel_flag`, for the
+    /// same reason: `cancel_generation` must not lock `sd_context`, which the
+    /// generation command holds for the whole generation.
+    pub cancel_handle: Arc<CancelHandle>,
     pub active_model: Mutex<Option<String>>,
     pub generating: AtomicBool,
     pub sd_context: Mutex<Option<SdContext>>,
@@ -56,6 +60,7 @@ impl AppState {
         Ok(Self {
             app_handle,
             cancel_flag: Arc::new(AtomicBool::new(false)),
+            cancel_handle: Arc::new(CancelHandle::new()),
             active_model: Mutex::new(None),
             generating: AtomicBool::new(false),
             sd_context: Mutex::new(None),
@@ -80,8 +85,14 @@ impl AppState {
             taesd_path: paths.taesd_path,
             lora_apply_mode: LoraApplyMode::Auto,
         };
-        // Share cancel_flag so cancel_generation doesn't need to lock sd_context
-        let ctx = SdContext::with_cancel_flag(config, self.cancel_flag.clone())?;
+        // Share cancel_flag and cancel_handle so cancel_generation doesn't need to
+        // lock sd_context. The handle is re-pointed at the new sd.cpp context by
+        // SdCppContext::new, and cleared before the old one is freed.
+        let ctx = SdContext::with_cancel_flag(
+            config,
+            self.cancel_flag.clone(),
+            self.cancel_handle.clone(),
+        )?;
         let mut lock = self.sd_context.lock().map_err(|e| sd_wrapper::SdError::ContextCreationFailed {
             reason: format!("Lock poisoned: {}", e),
         })?;
