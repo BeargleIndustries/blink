@@ -1,0 +1,122 @@
+Item 6 pre-change baseline — captured BEFORE any `sd_img_gen_params.cache` code existed.
+
+GIT SHA:        adcea9a  (item 3; items 1-5 all landed: 752c00e, 02bbf46, e445b2c, cafeb02, 0b723c2)
+CAPTURED:       2026-09-03, worker-4
+WORKING TREE:   adcea9a plus the user's uncommitted LoRA WIP, which does not touch this
+                path — this run passes zero LoRAs, so `params.loras` is empty and every WIP
+                hunk in `ffi_bridge.rs` / `generation.rs` is an eprintln or a divisor that
+                never executes here.
+CACHE:          WARM page cache. Each of the four runs below is a separate process; the
+                first is discarded per the timing methodology in the header of
+                `crates/sd-wrapper/tests/smoke_generation.rs`.
+
+MODEL:          Z-Image Turbo Q8_0
+                diffusion  %APPDATA%\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf
+                llm        %APPDATA%\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+                vae        %APPDATA%\com.beargle.blink\models\z-image\ae.safetensors
+PLACEMENT:      auto_fit = true, low_memory = false (item 2's default; sd.cpp chose
+                --params-backend "diffusion=disk,te=disk,vae=disk")
+RESOLUTION:     512 x 512
+STEPS:          4
+CFG:            1.0
+SAMPLER:        Euler
+SEED:           42   (fixed — the whole point of this file)
+GPU:            NVIDIA RTX 4070 SUPER, 12 GB, CUDA 13.2
+
+COMMAND:
+  cargo test -p sd-wrapper --test smoke_generation zimage_txt2img \
+    -- --ignored --nocapture --test-threads=1
+
+RESULT — this is what acceptance criteria 1 and 2 compare against:
+
+  FNV-1a over the raw RGBA:  cb2162f52e872c5b
+  buffer length:             1048576 bytes
+
+  This hash is unchanged across items 2, 3 and 4 (research §4b recorded the same value
+  before the auto_fit switch), so it is a stable reference for "caching did nothing"
+  versus "caching changed the image".
+
+WARM WALL TIMES (txt2img only, excluding context creation):
+
+  run 1  4.1855891 s   <- discarded (first of the session)
+  run 2  4.2389076 s
+  run 3  4.0320477 s
+  run 4  4.1431716 s
+
+  median of runs 2-4:  4.1431716 s
+
+  Context creation for reference: 371.95 / 363.73 / 351.63 / 353.75 ms.
+
+NOTE ON COMPARABILITY: measure the `spectrum` arm the same way — one generation per
+process, `--test-threads=1`, alternating with the `off` arm, first run of the session
+discarded. A test that reuses one context for several generations in-process reports
+~3.24 s for the same work, because the first generation warms the CUDA handles; those
+numbers are NOT comparable with the ones above.
+
+ACCEPTANCE CRITERIA THIS FILE SERVES:
+  C1  fast_mode OFF must reproduce cb2162f52e872c5b / 1048576 bytes exactly.
+  C2  fast_mode ON must produce a DIFFERENT hash. An identical hash means `spectrum` did
+      nothing on this architecture and any measured speedup was noise — stop, do not ship.
+
+===============================================================================
+MEASUREMENT GATE RESULT — appended after the spectrum code landed
+===============================================================================
+
+METHODOLOGY: one generation per process, --test-threads=1, arms alternated
+off/spectrum/off/..., first run of the session discarded. Driven by
+BLINK_TEST_CACHE=off|spectrum and BLINK_TEST_STEPS.
+
+ARM A — the shipping configuration (4 steps, Z-Image Turbo's own step count)
+
+  off       3.9583  3.9140  3.9204   median 3.9204 s   hash cb2162f52e872c5b
+  spectrum  3.9821  3.9365  3.9194   median 3.9365 s   hash cb2162f52e872c5b
+  (a further off run, 3.9724 s, was discarded as the first of the session)
+
+  Speed gate:   median(spectrum) <= 0.85 x median(off)
+                3.9365 <= 3.3323 ?  NO  ->  FAIL  (spectrum is 0.4% SLOWER, i.e. noise)
+  C1 off path inert:                hash matches the baseline exactly  ->  PASS
+  C2 on path changes the output:    hash IDENTICAL to the baseline     ->  FAIL
+
+ROOT CAUSE (investigated per criterion 2's "stop and investigate" instruction):
+
+  stable-diffusion.cpp:3546   cache_params->spectrum_warmup_steps = 4;
+  stable-diffusion.cpp:3547   cache_params->spectrum_stop_percent = 0.9f;
+  src/runtime/spectrum.hpp:49-55
+      bool should_predict() {
+          if (cnt < config.warmup_steps) return false;
+          if (stop_step > 0 && cnt >= stop_step) return false;
+          if ((int)H_buf.size() < 2) return false;
+          ...
+
+  Z-Image Turbo runs 4 steps. `cnt` therefore never reaches `warmup_steps`, and
+  `stop_step` is (int)(0.9 * 4) = 3, so the predict path is closed twice over.
+  The cache is inert BY CONSTRUCTION on the flagship stack, not broken.
+
+ARM B — diagnostic only, 20 steps, to establish whether spectrum works at all
+
+  off       7.2302  7.2430  7.2431   median 7.2430 s   hash 22983f97f82afb53
+  spectrum  5.3680  5.3739  5.3950   median 5.3739 s   hash 836a6864b9ba1308
+  (a further off run, 7.2685 s, was discarded as the first of the session)
+
+  median(spectrum) / median(off) = 0.7420  ->  25.8% faster, and the output
+  changes. The mechanism works; it simply cannot engage at 4 steps.
+
+  NB: 20 steps at cfg 1.0 on a Turbo model is not a configuration anyone should
+  ship. This arm exists only to distinguish "spectrum is inert here" from
+  "spectrum is broken", which criterion 2 requires before drawing a conclusion.
+
+DECISION: gate FAILED for the shipping configuration -> NOT SHIPPED.
+
+A "Fast mode" toggle was implemented and then reverted (the implementation is in
+772cc97, the revert in the commit that follows it; this file is re-landed as
+evidence). A user-facing control that provably does nothing on Blink's flagship
+<=4-step models fails Principle 1 more than a 25.8% gain on 20-step models
+justifies, and the human-eye quality comparison was never performed.
+
+The human-eye quality gate remains UNPERFORMED. It must be done before anyone
+enables spectrum in any form.
+
+FOLLOW-UP: on a >=20-step model (Flux dev, SDXL) the speed gate passes
+comfortably. The right shape is automatic enablement keyed off the step count --
+on when steps exceed spectrum_warmup_steps, off below -- after that quality
+check. Not a user-facing toggle, and not a global flip.
