@@ -171,6 +171,32 @@ struct Placement {
     low_memory: bool,
 }
 
+/// Read `BLINK_TEST_STEPS` (default 4, Z-Image Turbo's own step count).
+///
+/// Item 6 needs this: sd.cpp's `spectrum` cache has `spectrum_warmup_steps = 4`
+/// (`stable-diffusion.cpp:3546`) and `spectrum_stop_percent = 0.9`, so on a
+/// 4-step generation `SpectrumState::should_predict()` is false for every step
+/// and the cache is inert by construction.
+fn steps_from_env() -> u32 {
+    std::env::var("BLINK_TEST_STEPS")
+        .ok()
+        .map(|v| v.parse().expect("BLINK_TEST_STEPS must be a positive integer"))
+        .unwrap_or(4)
+}
+
+/// Read `BLINK_TEST_CACHE`: `off` (default) | `spectrum`.
+///
+/// This is the knob item 6's measurement gate alternates between. It maps to
+/// `GenerationParams::fast_mode`, which selects `SD_CACHE_SPECTRUM`; no other
+/// cache mode is reachable.
+fn fast_mode_from_env() -> bool {
+    match std::env::var("BLINK_TEST_CACHE").as_deref() {
+        Ok("spectrum") => true,
+        Ok("off") | Err(_) => false,
+        Ok(other) => panic!("BLINK_TEST_CACHE={other:?} is not one of off | spectrum"),
+    }
+}
+
 /// Read `BLINK_TEST_PLACEMENT`: `auto_fit` (default) | `low_memory` | `resident`.
 ///
 /// This is the knob the item-2 measurement gate alternates between. `resident`
@@ -244,12 +270,19 @@ fn zimage_txt2img_produces_a_real_image() {
         prompt: "a red apple on a wooden table, studio lighting".to_string(),
         width: 512,
         height: 512,
-        steps: 4,
+        steps: steps_from_env(),
         cfg_scale: 1.0,
         seed: 42,
         sample_method: SampleMethod::Euler,
+        fast_mode: fast_mode_from_env(),
         ..Default::default()
     };
+    let fast_mode = params.fast_mode;
+    eprintln!(
+        "[smoke] cache={} steps={}",
+        if fast_mode { "spectrum" } else { "off" },
+        params.steps
+    );
 
     let gen_started = std::time::Instant::now();
     let image = ctx
@@ -267,7 +300,11 @@ fn zimage_txt2img_produces_a_real_image() {
     // Write it out so the result can be eyeballed.
     // Name the file after the placement mode so successive runs do not overwrite
     // each other — the outputs need to be comparable side by side.
-    let suffix = placement.label;
+    let suffix = if fast_mode {
+        format!("{}_spectrum", placement.label)
+    } else {
+        placement.label.to_string()
+    };
 
     // Checksum the raw RGBA (not the PNG) so the comparison is not affected by
     // encoder settings or metadata.
@@ -934,5 +971,66 @@ fn warm_generation_does_not_regress_against_the_item_2_median() {
         median <= bound,
         "warm median {median:.4}s regressed past {bound:.4}s (1.15 x item 2's \
          recorded {ITEM_2_AUTO_FIT_MEDIAN_SECS:.4}s)"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Inference cache (item 6)
+// ---------------------------------------------------------------------------
+
+/// Pins the finding that decided item 6's measurement gate.
+///
+/// sd.cpp's `spectrum` cache does not predict until it has seen
+/// `spectrum_warmup_steps` steps, which defaults to **4**
+/// (`stable-diffusion.cpp:3546`), and stops again at
+/// `spectrum_stop_percent = 0.9` of the run (`:3547`). Blink's flagship stack is
+/// Z-Image Turbo at **4 steps**, so `SpectrumState::should_predict()`
+/// (`src/runtime/spectrum.hpp:49-55`) is false for every step of a default
+/// generation and the cache is inert by construction — identical output, identical
+/// time. That is why "Fast mode" ships OFF.
+///
+/// The same cache is emphatically not broken: at 20 steps it changes the output
+/// and, measured across processes, is ~25.8% faster. Only the hashes are asserted
+/// here, because wall times from several generations sharing one context are not
+/// comparable with the per-process numbers in
+/// `docs/traces/cache-baseline-6b3edaa.txt` — the first generation warms the CUDA
+/// handles for the rest.
+///
+/// If this test ever fails at 4 steps, upstream has changed the warmup default and
+/// the gate must be re-run before "Fast mode" keeps its current wording.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn spectrum_cache_is_inert_at_turbo_step_counts_and_active_at_twenty() {
+    let ctx = zimage_cancel_context();
+
+    let render = |steps: u32, fast_mode: bool| {
+        let mut params = zimage_cancel_params(steps, 42);
+        params.fast_mode = fast_mode;
+        let img = ctx
+            .txt2img(params, Vec::new(), None, None)
+            .unwrap_or_else(|e| panic!("steps={steps} fast_mode={fast_mode} failed: {e:?}"));
+        let mut hash: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a
+        for &b in &img.data {
+            hash ^= b as u64;
+            hash = hash.wrapping_mul(0x1000_0000_01b3);
+        }
+        eprintln!("[cache] steps={steps} fast_mode={fast_mode} rgba_fnv1a={hash:016x}");
+        hash
+    };
+
+    let turbo_off = render(4, false);
+    let turbo_on = render(4, true);
+    assert_eq!(
+        turbo_off, turbo_on,
+        "spectrum changed the 4-step output — upstream's warmup default has moved, \
+         re-run item 6's measurement gate"
+    );
+
+    let long_off = render(20, false);
+    let long_on = render(20, true);
+    assert_ne!(
+        long_off, long_on,
+        "spectrum did nothing at 20 steps either — the cache is not engaging at all \
+         on this architecture, and Fast mode is dead UI"
     );
 }

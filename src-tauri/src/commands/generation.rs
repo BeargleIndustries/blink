@@ -108,6 +108,10 @@ pub async fn generate_image(
         ref_images: request.ref_images.clone().unwrap_or_default(),
         img_cfg: request.img_cfg,
         loras,
+        // "Fast mode" — sd.cpp's spectrum cache. Off unless the user opts in:
+        // the measurement gate failed on the 4-step flagship stack, where the
+        // cache's own 4-step warmup means it never fires.
+        fast_mode: crate::commands::settings::stored_perf_settings(&state).fast_mode,
     };
 
     let is_img2img = request.input_image.is_some();

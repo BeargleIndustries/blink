@@ -296,3 +296,60 @@ post-fix output and still looks right, but it is compensating for bug 2 only.
   single-line prompt bar without work. Deprioritize.
 - ADetailer's converter and SeFi's `convert_sefi.py` are Python — fine for you as the packager,
   but must never land in the user install path.
+
+## 4d. Measured: `spectrum` inference caching cannot engage on a 4-step Turbo model
+
+Item 6's measurement gate, run on `adcea9a` (items 1-5 landed). Full numbers and methodology:
+`docs/traces/cache-baseline-6b3edaa.txt`.
+
+**The shipping configuration — Z-Image Turbo Q8, 512x512, 4 steps, Euler, cfg 1.0, seed 42,
+`auto_fit` placement. One generation per process, `--test-threads=1`, arms alternated, first
+run of the session discarded.**
+
+| arm | runs (s) | median (s) | FNV-1a over raw RGBA |
+|---|---|---|---|
+| `off` | 3.9583 / 3.9140 / 3.9204 | **3.9204** | `cb2162f52e872c5b` |
+| `spectrum` | 3.9821 / 3.9365 / 3.9194 | **3.9365** | `cb2162f52e872c5b` |
+
+The speed gate (`median(spectrum) <= 0.85 x median(off)`) fails: spectrum is 0.4% *slower*,
+i.e. indistinguishable from noise. The output is **byte-identical**, which the plan's
+acceptance criterion 2 correctly treats as proof the cache did nothing rather than as good news.
+
+**Root cause, and it is structural, not a bug.** `sd_cache_params_init` sets
+`spectrum_warmup_steps = 4` (`stable-diffusion.cpp:3546`) and `spectrum_stop_percent = 0.9`
+(`:3547`). `SpectrumState::should_predict()` (`src/runtime/spectrum.hpp:49-55`) returns false
+while `cnt < warmup_steps` and again once `cnt >= stop_step`, where
+`stop_step = (int)(0.9 * total_steps)`. On a 4-step generation that is `cnt < 4` and
+`cnt >= 3` — the predict path is closed twice over, for every step. **Any model whose step
+count is at or below the warmup threshold gets nothing from `spectrum`, by construction.**
+That is precisely the Turbo/Lightning/schnell class Blink leads with.
+
+**The mechanism itself works.** Diagnostic arm at 20 steps (not a configuration to ship — 20
+steps at cfg 1.0 on a Turbo model — run only to separate "inert here" from "broken"):
+
+| arm | runs (s) | median (s) | FNV-1a |
+|---|---|---|---|
+| `off` | 7.2302 / 7.2430 / 7.2431 | **7.2430** | `22983f97f82afb53` |
+| `spectrum` | 5.3680 / 5.3739 / 5.3950 | **5.3739** | `836a6864b9ba1308` |
+
+Ratio 0.7420 — **25.8% faster**, and the output changes. So on a >=20-step model (Flux dev,
+SDXL) the speed gate would pass comfortably.
+
+**Shipped as:** one "Fast mode" toggle in the Settings drawer's existing Performance section,
+**off by default**. No cache mode and no `spectrum_*` parameter is exposed. The human-eye
+quality comparison the plan makes decisive for a *default-on* flip was **not performed** and is
+not needed for an opt-in toggle — but it must be done before anyone considers defaulting it on.
+
+**If this is ever revisited,** the right shape is a per-model default keyed off the step count
+(on above ~20 steps, off below), not a global flip — and `spectrum_warmup_steps` is the knob
+that decides where that line sits. `spectrum` is also unsupported for CFG++ samplers, which
+sd.cpp warns about and silently disables (`stable-diffusion.cpp:2588-2595`).
+
+### Also measured while implementing item 3
+
+Under item 2's `auto_fit` placement sd.cpp chose `--params-backend "diffusion=disk,te=disk,vae=disk"`,
+so weights are re-streamed lazily inside **every** generation, not held resident. On a warm
+4-step run the first `sampling`-phase progress event arrives at a median of **2.13 s of a
+3.24 s run — about 66%**, all of it the lazy read of ~838 tensors (386 text-encoder + 452
+diffusion). Warm `SdContext::new` is only **0.26-0.38 s**, because it maps rather than reads.
+The **cold** cost of `new_sd_ctx` under `disk` placement remains unmeasured.

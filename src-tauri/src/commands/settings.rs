@@ -46,6 +46,20 @@ pub async fn save_settings(state: State<'_, AppState>, settings: AppSettings) ->
     Ok(())
 }
 
+/// The stored performance settings, or defaults if none/unreadable.
+///
+/// Non-async and infallible so the generation command can consult it without
+/// growing an error path for a setting whose fallback is simply "off".
+pub(crate) fn stored_perf_settings(state: &AppState) -> PerfSettings {
+    state
+        .app_handle
+        .store("settings.json")
+        .ok()
+        .and_then(|s| s.get("perf_settings"))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub async fn get_perf_settings(state: State<'_, AppState>) -> Result<PerfSettings, String> {
     let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
@@ -60,7 +74,11 @@ pub async fn save_perf_settings(state: State<'_, AppState>, settings: PerfSettin
     let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
     store.set("perf_settings", serde_json::to_value(&settings).map_err(|e| e.to_string())?);
     store.save().map_err(|e| e.to_string())?;
-    log::info!("Perf settings saved: low_memory={}", settings.low_memory);
+    log::info!(
+        "Perf settings saved: low_memory={}, fast_mode={}",
+        settings.low_memory,
+        settings.fast_mode
+    );
     Ok(())
 }
 
