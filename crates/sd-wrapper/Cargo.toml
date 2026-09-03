@@ -13,6 +13,10 @@ sd-sys = { path = "../sd-sys" }
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 
+[dev-dependencies]
+# Integration tests encode a small PNG to drive the img2img entry point.
+image = "0.25"
+
 [features]
 default = []
 metal = ["sd-sys/metal"]

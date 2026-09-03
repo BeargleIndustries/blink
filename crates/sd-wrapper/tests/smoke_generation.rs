@@ -772,6 +772,129 @@ fn cancel_during_model_switch_does_not_crash() {
     }
 }
 
+/// Native cancellation must still work after a model switch.
+///
+/// `AppState` shares ONE `CancelHandle` for the life of the process and
+/// `load_model` builds the replacement context *before* dropping the old one
+/// (`state.rs`), so the old context's `Drop` runs last and gets the final word
+/// on the handle. An unconditional `clear()` there stores `None` over the live
+/// pointer and every later `cancel()` silently degrades to "park it in
+/// `pending`" — the user waits out the whole generation. This test drives that
+/// exact ordering through the shared handle, so it fails against an
+/// unconditional clear and passes against a compare-and-clear.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn cancel_after_model_switch_stops_mid_generation() {
+    use sd_wrapper::{CancelHandle, SdContext, SdError};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+
+    // The app's sharing shape: one flag and one handle, reused across loads.
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    let cancel_handle = Arc::new(CancelHandle::new());
+
+    let first = SdContext::with_cancel_flag(
+        zimage_config(),
+        Arc::clone(&cancel_flag),
+        Arc::clone(&cancel_handle),
+        None,
+    )
+    .expect("failed to create the first sd.cpp context");
+    let second = SdContext::with_cancel_flag(
+        zimage_config(),
+        Arc::clone(&cancel_flag),
+        Arc::clone(&cancel_handle),
+        None,
+    )
+    .expect("failed to create the second sd.cpp context");
+    // `load_model`'s order: the old context is released only once the new one
+    // exists, so its `Drop` sees a handle already pointing at the new context.
+    drop(first);
+
+    // Enough steps that "stops mid-generation" is measurable rather than noise.
+    const STEPS: u32 = 12;
+    let ctx = &second;
+
+    let t0 = std::time::Instant::now();
+    ctx.txt2img(zimage_cancel_params(STEPS, 42), Vec::new(), None, None)
+        .expect("baseline generation on the post-switch context failed");
+    let uncancelled = t0.elapsed();
+    eprintln!("[cancel] post-switch uncancelled {STEPS}-step run: {uncancelled:?}");
+
+    let t1 = std::time::Instant::now();
+    let result = std::thread::scope(|s| {
+        s.spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+            ctx.cancel();
+        });
+        ctx.txt2img(zimage_cancel_params(STEPS, 43), Vec::new(), None, None)
+    });
+    let cancelled = t1.elapsed();
+    eprintln!("[cancel] post-switch cancelled run returned after {cancelled:?}");
+
+    // Timing first: this is the assertion that discriminates a live native
+    // cancel from one that was silently disarmed by the model switch.
+    assert!(
+        cancelled.as_secs_f64() < 0.75 * uncancelled.as_secs_f64(),
+        "native cancel was disarmed by the model switch: cancelled={cancelled:?} vs \
+         uncancelled={uncancelled:?}"
+    );
+    assert!(
+        matches!(result, Err(SdError::Cancelled)),
+        "cancel during sampling must yield Cancelled, got: {result:?}"
+    );
+}
+
+/// An undecodable inpainting mask must fail cleanly and leave the context usable.
+///
+/// The mask decode used to sit *after* the global progress and preview callbacks
+/// were installed, so its `?` returned past the teardown: both trampoline boxes
+/// leaked and sd.cpp kept calling into them. The decode now runs before the
+/// install point. The user-visible half of that is the second generation below.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn an_undecodable_mask_fails_cleanly_and_leaves_the_context_usable() {
+    use sd_wrapper::{Img2ImgParams, SdError};
+
+    std::env::remove_var("BLINK_TEST_PREFLIGHT_DELAY_MS");
+    let ctx = zimage_cancel_context();
+
+    // A valid PNG for the init image, so the mask is the only thing that fails.
+    let buf = image::RgbImage::from_fn(256, 256, |x, y| image::Rgb([x as u8, y as u8, 128]));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(buf)
+        .write_to(&mut png, image::ImageFormat::Png)
+        .expect("failed to encode the test init image");
+
+    let err = ctx
+        .img2img(
+            png.into_inner(),
+            Some(b"not an image".to_vec()),
+            Img2ImgParams {
+                base: zimage_cancel_params(4, 42),
+                strength: 0.4,
+            },
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("an undecodable mask must be rejected");
+    assert!(
+        matches!(err, SdError::InvalidParams { .. }),
+        "expected InvalidParams for an undecodable mask, got: {err:?}"
+    );
+
+    let image = ctx
+        .txt2img(zimage_cancel_params(4, 43), Vec::new(), None, None)
+        .expect("a generation after a rejected mask must succeed");
+    if let Some(reason) = degeneracy_reason(&image.data, image.width, image.height) {
+        panic!("post-failure generation produced a degenerate image: {reason}");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Load phase (item 3)
 // ---------------------------------------------------------------------------

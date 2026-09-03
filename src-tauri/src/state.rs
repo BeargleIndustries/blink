@@ -113,7 +113,10 @@ impl AppState {
 
         // Share cancel_flag and cancel_handle so cancel_generation doesn't need to
         // lock sd_context. The handle is re-pointed at the new sd.cpp context by
-        // SdCppContext::new, and cleared before the old one is freed.
+        // SdCppContext::new; the OLD context is dropped afterwards (below), so its
+        // Drop runs last. That is why the handle's clear() is a compare-and-clear
+        // against the dropping context's own pointer — an unconditional clear here
+        // would disarm native cancel for every generation after the first switch.
         let ctx = SdContext::with_cancel_flag(
             config,
             self.cancel_flag.clone(),

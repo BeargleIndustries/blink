@@ -65,13 +65,21 @@ impl CancelHandle {
         }
     }
 
-    /// Retract the pointer. Called on the inference thread *before* `free_sd_ctx`.
-    fn clear(&self) {
+    /// Retract `ptr`. Called on the inference thread *before* `free_sd_ctx`.
+    ///
+    /// Compare-and-clear: a context only ever retracts its OWN pointer. One
+    /// handle is shared for the life of the process and `AppState::load_model`
+    /// builds the replacement context *before* dropping the old one, so the old
+    /// `Drop` runs last; an unconditional clear here would store `None` over the
+    /// live pointer and disarm native cancellation for the rest of the session.
+    fn clear(&self, ptr: *mut sd_sys::sd_ctx_t) {
         let mut guard = match self.ctx.lock() {
             Ok(g) => g,
             Err(poisoned) => poisoned.into_inner(),
         };
-        *guard = None;
+        if guard.as_ref().map(|p| p.0) == Some(ptr) {
+            *guard = None;
+        }
     }
 
     /// Ask sd.cpp to stop at its next check point. Safe from any thread.
@@ -473,6 +481,28 @@ impl SdCppContext {
             };
         }
 
+        // --- Decode the inpainting mask ---
+        // Decoded HERE, before the global progress/preview callbacks are
+        // installed. It is the last fallible step in the setup, and an early
+        // return past the install point would leak both trampoline boxes and
+        // leave sd.cpp's global callbacks pointing into them.
+        let decoded_mask: Option<Vec<u8>> = match (input_image, mask_image) {
+            (Some(_), Some(mask_bytes)) => {
+                let mask_img =
+                    image::load_from_memory(mask_bytes).map_err(|e| SdError::InvalidParams {
+                        reason: format!("Failed to decode mask image: {}", e),
+                    })?;
+                let resized_mask = mask_img.resize_exact(
+                    img2img_width,
+                    img2img_height,
+                    image::imageops::FilterType::Nearest,
+                );
+                Some(resized_mask.to_luma8().into_raw())
+            }
+            // A mask without an init image is ignored, as it was before.
+            _ => None,
+        };
+
         // Set up progress trampoline — heap-allocated so it outlives any early return
         // from generate() while sd.cpp's global callback is still set.
         // Start every generation in `Loading` with the latch clear, so a lazy
@@ -518,7 +548,17 @@ impl SdCppContext {
             // path after generate_image, so the two cannot drift apart. Order is
             // load-bearing: clear first so sd.cpp can no longer call into the
             // boxes, then reclaim them.
+            //
+            // Single-call invariant: it reclaims both boxes, so a second call
+            // would be a double `Box::from_raw`. It has to stay `Fn` (the two
+            // call sites are on mutually exclusive paths the compiler cannot
+            // see), so the guard below catches a future double call in debug.
+            let _torn_down = std::cell::Cell::new(false);
             let teardown = || {
+                debug_assert!(
+                    !_torn_down.replace(true),
+                    "teardown() called twice — double Box::from_raw"
+                );
                 sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
                 let _ = Box::from_raw(trampoline_ptr);
                 if !preview_trampoline_ptr.is_null() {
@@ -606,13 +646,9 @@ impl SdCppContext {
             };
 
             if input_image.is_some() {
-                // If a mask was provided, decode and resize it to match the aligned dimensions
-                if let Some(mask_bytes) = mask_image {
-                    let mask_img = image::load_from_memory(mask_bytes).map_err(|e| SdError::InvalidParams {
-                        reason: format!("Failed to decode mask image: {}", e),
-                    })?;
-                    let resized_mask = mask_img.resize_exact(img2img_width, img2img_height, image::imageops::FilterType::Nearest);
-                    mask_data = resized_mask.to_luma8().into_raw();
+                // Decoded and resized above, before the callbacks were installed.
+                if let Some(mask) = decoded_mask {
+                    mask_data = mask;
                 }
 
                 gen_params.init_image = init_image;
@@ -755,8 +791,9 @@ impl Drop for SdCppContext {
     fn drop(&mut self) {
         // Retract the pointer BEFORE freeing it. `clear()` blocks until any
         // in-flight `cancel()` has released the lock, so sd.cpp can never be
-        // handed a freed context.
-        self.cancel_handle.clear();
+        // handed a freed context. It is a compare-and-clear against our own
+        // pointer, so dropping a superseded context leaves the live one armed.
+        self.cancel_handle.clear(self.ctx);
         if !self.ctx.is_null() {
             log::info!("Freeing sd.cpp context");
             unsafe {
@@ -1014,15 +1051,46 @@ mod tests {
         );
     }
 
+    // The sentinels below are stored and compared, never dereferenced: `set()`
+    // only calls into sd.cpp when `pending` is already latched, and `clear()` is
+    // pure Rust. So these stay CI-safe while covering the pointer bookkeeping.
+
     #[test]
     fn cancel_handle_is_inert_after_clear() {
         let handle = CancelHandle::new();
-        handle.clear();
-        // clear() leaves ctx None, so this parks rather than dereferencing a
+        let ptr = 0x1000 as *mut sd_sys::sd_ctx_t;
+        handle.set(ptr);
+        handle.clear(ptr);
+        // clear() left ctx None, so this parks rather than dereferencing a
         // freed pointer. The point is that it does not crash and does not call in.
         handle.cancel();
         assert!(handle.ctx.lock().unwrap().is_none());
         assert!(handle.pending.load(Ordering::SeqCst));
+    }
+
+    /// The model-switch ordering: `AppState` shares one handle, the replacement
+    /// context publishes itself first, and the superseded context is dropped
+    /// afterwards. Its `clear()` must not retract the live pointer.
+    #[test]
+    fn clear_only_retracts_its_own_pointer() {
+        let old = 0x1000 as *mut sd_sys::sd_ctx_t;
+        let new = 0x2000 as *mut sd_sys::sd_ctx_t;
+
+        let handle = CancelHandle::new();
+        handle.set(old);
+        handle.set(new);
+        handle.clear(old);
+        assert_eq!(
+            handle.ctx.lock().unwrap().as_ref().map(|p| p.0),
+            Some(new),
+            "dropping a superseded context must leave the live one armed"
+        );
+
+        handle.clear(new);
+        assert!(
+            handle.ctx.lock().unwrap().is_none(),
+            "a context must still retract its own pointer"
+        );
     }
 
     // -- ContextConfig with missing model returns ModelNotFound --
