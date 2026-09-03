@@ -1,3 +1,20 @@
+/// How sd.cpp should apply LoRA weights.
+///
+/// `Auto` mirrors sd.cpp's own choice: it falls back to `AtRuntime` whenever the
+/// model has quantized weights, parameters are offloaded, or layer streaming is
+/// active — all of which are true for Blink's quantized Z-Image setup. The runtime
+/// path re-reads the LoRA file once per backend module, which is the behaviour
+/// reported in sd.cpp issue #1071.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoraApplyMode {
+    Auto,
+    /// Merge LoRA into the weights up front. Faster inference, but sd.cpp warns it
+    /// can lose precision or fail outright against quantized parameters.
+    Immediately,
+    /// Apply during the forward pass. Better compatibility and precision.
+    AtRuntime,
+}
+
 #[derive(Debug, Clone)]
 pub struct ContextConfig {
     pub model_path: Option<String>,
@@ -31,6 +48,8 @@ pub struct ContextConfig {
     pub control_net_path: Option<String>,
     // TAESD model path for live previews
     pub taesd_path: Option<String>,
+    /// LoRA application strategy. Defaults to `Auto` (sd.cpp's own choice).
+    pub lora_apply_mode: LoraApplyMode,
 }
 
 impl ContextConfig {

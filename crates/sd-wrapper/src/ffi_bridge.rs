@@ -153,6 +153,12 @@ impl SdCppContext {
             params.diffusion_flash_attn = config.diffusion_flash_attn;
             params.enable_mmap = config.enable_mmap;
 
+            params.lora_apply_mode = match config.lora_apply_mode {
+                LoraApplyMode::Auto => sd_sys::lora_apply_mode_t_LORA_APPLY_AUTO,
+                LoraApplyMode::Immediately => sd_sys::lora_apply_mode_t_LORA_APPLY_IMMEDIATELY,
+                LoraApplyMode::AtRuntime => sd_sys::lora_apply_mode_t_LORA_APPLY_AT_RUNTIME,
+            };
+
             // CPU offload is now expressed as a `params_backend` assignment string
             // rather than individual booleans. Keep the CString alive until after
             // new_sd_ctx() returns — sd.cpp borrows the pointer during the call.
@@ -806,7 +812,7 @@ mod tests {
             offload_params_to_cpu: false,
             control_net_path: None,
             taesd_path: None,
-        };
+            lora_apply_mode: LoraApplyMode::Auto,        };
         // Match on the Result directly rather than calling unwrap_err(): that
         // requires the Ok type to implement Debug, and SdCppContext deliberately
         // does not (it wraps a raw sd_ctx_t pointer).

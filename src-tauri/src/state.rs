@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Manager};
-use sd_wrapper::{SdContext, ContextConfig, UpscalerContext};
+use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +93,7 @@ impl AppState {
             offload_params_to_cpu: perf.offload_params_to_cpu,
             control_net_path: paths.control_net_path,
             taesd_path: paths.taesd_path,
+            lora_apply_mode: LoraApplyMode::Auto,
         };
         // Share cancel_flag so cancel_generation doesn't need to lock sd_context
         let ctx = SdContext::with_cancel_flag(config, self.cancel_flag.clone())?;

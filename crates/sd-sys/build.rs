@@ -190,7 +190,17 @@ fn main() {
         .expect("Failed to write bindings");
 
     // --- Rerun triggers ---
+    // Watch the vendored C++ sources, not just the header. Without this cargo
+    // considers sd-sys up to date after a submodule bump or a local patch to
+    // stable-diffusion.cpp, silently skipping the build script and linking a
+    // stale library — the change appears to have no effect.
     println!("cargo:rerun-if-changed={}", header_path.display());
+    println!("cargo:rerun-if-changed={}", sd_cpp_dir.join("src").display());
+    println!("cargo:rerun-if-changed={}", sd_cpp_dir.join("include").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        sd_cpp_dir.join("CMakeLists.txt").display()
+    );
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
 }

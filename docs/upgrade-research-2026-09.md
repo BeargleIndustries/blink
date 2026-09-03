@@ -174,6 +174,80 @@ than one GPU before being treated as a win.
 
 *Caveat: n=3 per config, one machine, one model, one resolution.*
 
+## 4c. LoRA on Z-Image: two separate bugs, one fixable
+
+Investigated on branch `feat/sdcpp-bump-2026-09` with `crates/sd-wrapper/tests/smoke_generation.rs`
+(`lora_strength_probe`). Z-Image Turbo Q8, 512x512, 4 steps, seed 42.
+
+### Bug 1: `feed_forward` LoRA tensors silently discarded — FIXED (one line)
+
+sd.cpp converts LoRA key underscores to dots, with a `protected_tokens` allowlist in
+`src/name_conversion.cpp`. That list has `cross_attn` and `output_proj` (added by #1786 for
+Anima) and `token_refiner` (#1864, MiniMax H3), but **not `feed_forward`**. So
+`feed_forward_w1` becomes `feed.forward.w1`, matches no model tensor, and is dropped with a
+WARN nobody reads.
+
+Measured impact on real LoRAs:
+
+| LoRA | Key style | FFN tensors dropped |
+|---|---|---|
+| `ZIMAGE-CCD-V1` | kohya (`lora_down/up`) | 270 / 630 (43%) |
+| `pussy-zimage-v1` | diffusers (`lora_A/B`) | 180 / 480 (37.5%) |
+| `ohwx ohx_caro` | diffusers, attention-only | 0 (unaffected) |
+
+Adding `"feed_forward",` to `protected_tokens` drops unused-tensor warnings from 810 to 0 and
+increases LoRA influence ~2.1-2.7x (divergence at mult 1.0: 12.42 -> 25.57 / 255). Verified on
+both key styles. Worth upstreaming — one line, two direct precedents.
+
+Note the inconsistency this caused: an attention-only LoRA was always applied correctly while
+LoRAs with FFN layers lost ~40% of their weights. That alone makes LoRA strength feel
+unpredictable from file to file.
+
+### Bug 2: LoRA applied ~4x too strongly — STILL PRESENT, no fix available
+
+Upstream [issue #1071](https://github.com/leejet/stable-diffusion.cpp/issues/1071),
+"LoRA getting loaded four times in a row with z-image-turbo", is marked **Closed** on GitHub
+but the behaviour is still present at `6b3edaa`: the probe logs **4 LoRA file loads per
+generation** on the runtime path.
+
+Blink compensates in `src-tauri/src/commands/generation.rs` by dividing the user's multiplier
+by 4 for z-image. **Keep this.** It is empirically calibrated — at effective 1.0 these LoRAs
+overwhelm the prompt and impose their own subject; 0.25 is where they behave.
+
+A caution for anyone re-deriving this: clipping/saturation metrics do *not* detect it. Measured
+clipping at effective 1.0 is 0.02%, i.e. no burn at all. The failure mode is the LoRA dominating
+the prompt, which needs a human eye or a prompt-adherence metric, not a histogram.
+
+### `lora_apply_mode: Immediately` is NOT a workaround — it destroys quantized models
+
+sd.cpp gained `lora_apply_mode` (AUTO / IMMEDIATELY / AT_RUNTIME) since the old pin. Blink never
+set it, so AUTO applies, and AUTO picks AT_RUNTIME whenever weights are quantized or params are
+offloaded — both true here. Since AT_RUNTIME is the path that loads 4x, forcing IMMEDIATELY
+looked like a candidate fix. It is not:
+
+| multiplier | AT_RUNTIME | IMMEDIATELY |
+|---|---|---|
+| 0.25 | 10.21 / 255, 0.01% clipped | 54.16 / 255, 2.07% clipped |
+| 0.50 | 16.52 / 255, 0.05% clipped | 55.27 / 255, 2.12% clipped |
+| 1.00 | 25.57 / 255, 0.02% clipped | 51.35 / 255, 1.61% clipped |
+
+IMMEDIATELY output is **pure checkerboard noise**, not an image. Divergence is also
+non-monotonic (0.25 diverges more than 1.0) because the multiplier is irrelevant once the
+weights are destroyed. This is the documented "precision and compatibility issues with quantized
+parameters" — merging LoRA deltas into Q8 weights corrupts them. AUTO's refusal is correct.
+
+`LoraApplyMode` is now plumbed through `ContextConfig` and defaults to `Auto`; the probe accepts
+`BLINK_TEST_LORA_MODE=immediate|runtime|auto`. Do not ship anything but `Auto` for quantized
+models.
+
+### Net effect on multiplier calibration
+
+The two bugs push in opposite directions: bug 1 was making LoRAs ~2.4x *weaker*, bug 2 makes
+them ~4x *stronger*. Fixing bug 1 while bug 2 remains means the same slider value now produces a
+visibly stronger result than before the bump. Existing gallery entries and saved settings will
+not reproduce at identical parameters. The 0.25 divisor was re-validated by eye against
+post-fix output and still looks right, but it is compensating for bug 2 only.
+
 ## 5. Suggested sequencing
 
 1. **Bump the submodule + fix the 4 breakages.** Unlocks everything else. Rebuild CUDA/Vulkan/Metal.

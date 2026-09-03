@@ -173,7 +173,7 @@ fn model_dir() -> PathBuf {
 #[test]
 #[ignore = "requires a downloaded Z-Image model and a GPU"]
 fn zimage_txt2img_produces_a_real_image() {
-    use sd_wrapper::{ContextConfig, GenerationParams, SampleMethod, SdContext};
+    use sd_wrapper::{ContextConfig, GenerationParams, LoraApplyMode, SampleMethod, SdContext};
 
     let dir = model_dir();
     let diffusion = dir.join("z-image").join("z_image_turbo-Q8_0.gguf");
@@ -207,7 +207,7 @@ fn zimage_txt2img_produces_a_real_image() {
         offload_params_to_cpu: std::env::var("BLINK_TEST_OFFLOAD").as_deref() != Ok("0"),
         control_net_path: None,
         taesd_path: None,
-    };
+        lora_apply_mode: LoraApplyMode::Auto,    };
 
     // Sanity-check the translation that replaced the removed offload fields.
     let offload = config.offload_params_to_cpu;
@@ -287,7 +287,7 @@ fn zimage_txt2img_produces_a_real_image() {
 #[test]
 #[ignore = "requires a downloaded Z-Image model and a GPU"]
 fn different_seeds_produce_different_images() {
-    use sd_wrapper::{ContextConfig, GenerationParams, SampleMethod, SdContext};
+    use sd_wrapper::{ContextConfig, GenerationParams, LoraApplyMode, SampleMethod, SdContext};
 
     let dir = model_dir();
     let diffusion = dir.join("z-image").join("z_image_turbo-Q8_0.gguf");
@@ -314,7 +314,7 @@ fn different_seeds_produce_different_images() {
         offload_params_to_cpu: true,
         control_net_path: None,
         taesd_path: None,
-    };
+        lora_apply_mode: LoraApplyMode::Auto,    };
 
     let ctx = SdContext::new(config).expect("failed to create sd.cpp context");
 
@@ -362,4 +362,140 @@ fn different_seeds_produce_different_images() {
         "only {:.2}% of bytes differ between seeds — suspiciously similar",
         frac * 100.0
     );
+}
+
+// ---------------------------------------------------------------------------
+// LoRA strength probe
+// ---------------------------------------------------------------------------
+
+/// Fraction of colour bytes clipped to 0 or 255 — an "overcooked" signal.
+///
+/// A LoRA applied several times stronger than intended typically saturates: blown
+/// highlights and crushed blacks. This gives a number to compare instead of an opinion.
+fn clipped_fraction(rgba: &[u8]) -> f64 {
+    let colour: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let clipped = colour.iter().filter(|&&b| b == 0 || b == 255).count();
+    clipped as f64 / colour.len() as f64
+}
+
+/// Mean absolute per-byte difference between two images, 0-255.
+fn mean_abs_diff(a: &[u8], b: &[u8]) -> f64 {
+    assert_eq!(a.len(), b.len());
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (*x as i32 - *y as i32).unsigned_abs() as f64)
+        .sum::<f64>()
+        / a.len() as f64
+}
+
+/// Measure how strongly a LoRA is actually applied, to decide whether the
+/// "Z-Image applies LoRA 4x" workaround in `src-tauri/src/commands/generation.rs`
+/// is still needed after the sd.cpp bump.
+///
+/// Renders the same seed with no LoRA, then at several multipliers, and reports
+/// divergence from baseline plus a clipping ratio. Run with `--nocapture` and read
+/// the table; sd.cpp's own log lines about applied/unmatched tensors are the other
+/// half of the evidence.
+///
+/// Point it at a LoRA with `BLINK_TEST_LORA=<path>`.
+#[test]
+#[ignore = "diagnostic probe; needs a Z-Image model and a LoRA"]
+fn lora_strength_probe() {
+    use sd_wrapper::{ContextConfig, GenerationParams, LoraApplyMode, LoraConfig, SampleMethod, SdContext};
+
+    let lora_path = match std::env::var("BLINK_TEST_LORA") {
+        Ok(p) => p,
+        Err(_) => {
+            eprintln!("[probe] set BLINK_TEST_LORA=<path to .safetensors> to run");
+            return;
+        }
+    };
+    assert!(
+        std::path::Path::new(&lora_path).exists(),
+        "LoRA not found: {lora_path}"
+    );
+
+    let dir = model_dir();
+    let config = ContextConfig {
+        model_path: None,
+        vae_path: Some(dir.join("z-image").join("ae.safetensors").to_string_lossy().into_owned()),
+        clip_l_path: None,
+        t5xxl_path: None,
+        diffusion_model_path: Some(
+            dir.join("z-image").join("z_image_turbo-Q8_0.gguf").to_string_lossy().into_owned(),
+        ),
+        llm_path: Some(
+            dir.join("z-image")
+                .join("Qwen3-4B-Instruct-2507-Q4_K_M.gguf")
+                .to_string_lossy()
+                .into_owned(),
+        ),
+        n_threads: 4,
+        flash_attn: true,
+        diffusion_flash_attn: true,
+        enable_mmap: true,
+        free_params_immediately: false,
+        keep_clip_on_cpu: false,
+        keep_vae_on_cpu: false,
+        offload_params_to_cpu: true,
+        control_net_path: None,
+        taesd_path: None,
+        // BLINK_TEST_LORA_MODE=immediate|runtime|auto (default auto)
+        lora_apply_mode: match std::env::var("BLINK_TEST_LORA_MODE").as_deref() {
+            Ok("immediate") => LoraApplyMode::Immediately,
+            Ok("runtime") => LoraApplyMode::AtRuntime,
+            _ => LoraApplyMode::Auto,
+        },
+    };
+    eprintln!("[probe] lora_apply_mode={:?}", config.lora_apply_mode);
+
+    let ctx = SdContext::new(config).expect("context creation failed");
+
+    let render = |mult: Option<f32>| {
+        let loras = match mult {
+            Some(m) => vec![LoraConfig {
+                path: lora_path.clone(),
+                multiplier: m,
+                is_high_noise: false,
+            }],
+            None => Vec::new(),
+        };
+        let params = GenerationParams {
+            prompt: "a portrait photograph of a woman, natural light".to_string(),
+            width: 512,
+            height: 512,
+            steps: 4,
+            cfg_scale: 1.0,
+            seed: 42,
+            sample_method: SampleMethod::Euler,
+            loras,
+            ..Default::default()
+        };
+        ctx.txt2img(params, Vec::new(), None, None)
+            .unwrap_or_else(|e| panic!("txt2img failed at {mult:?}: {e:?}"))
+    };
+
+    let base = render(None);
+    eprintln!(
+        "[probe] baseline (no lora): clipped={:.2}%",
+        clipped_fraction(&base.data) * 100.0
+    );
+
+    for mult in [0.25f32, 0.5, 1.0] {
+        let img = render(Some(mult));
+        let diff = mean_abs_diff(&base.data, &img.data);
+        let clip = clipped_fraction(&img.data) * 100.0;
+        let same = img.data == base.data;
+        eprintln!(
+            "[probe] mult={mult:<5} diff_from_base={diff:6.2}/255  clipped={clip:5.2}%  \
+             identical_to_base={same}"
+        );
+        let out = std::env::temp_dir().join(format!("blink_lora_probe_{mult}.png"));
+        image::save_buffer(&out, &img.data, img.width, img.height, image::ColorType::Rgba8)
+            .expect("save failed");
+    }
+    let out = std::env::temp_dir().join("blink_lora_probe_base.png");
+    image::save_buffer(&out, &base.data, base.width, base.height, image::ColorType::Rgba8)
+        .expect("save failed");
+    eprintln!("[probe] images written to {}", std::env::temp_dir().display());
 }
