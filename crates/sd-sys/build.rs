@@ -2,8 +2,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 /// The vendored source file the `feed_forward` fix lives in, relative to the
-/// submodule root. Checked as a postcondition so a build can never succeed
-/// without the LoRA FFN fix present.
+/// submodule root. Checked as a postcondition on every path except the explicit
+/// `BLINK_SKIP_SD_PATCHES=1` opt-out, so that opt-out is the only way a build
+/// can succeed without the LoRA FFN fix present.
 const FEED_FORWARD_FILE: &str = "src/name_conversion.cpp";
 /// The exact text the fix adds to `protected_tokens`.
 const FEED_FORWARD_TOKEN: &str = "\"feed_forward\",";
@@ -273,9 +274,13 @@ fn apply_vendored_patches(manifest_dir: &Path, sd_cpp_dir: &Path) {
     patches.sort();
 
     if patches.is_empty() {
-        // Nothing to do. This is the steady state after upstream merges every
-        // local fix; `vendored_patches.rs` still asserts the fix is present.
-        return;
+        // Nothing to apply. That is the steady state after upstream merges every
+        // local fix — and it is also exactly what an accidental deletion looks
+        // like, so this does NOT return: the postcondition below still runs.
+        println!(
+            "cargo:warning=no sd.cpp patches found in {}",
+            patch_dir.display()
+        );
     }
 
     for patch in &patches {
@@ -330,24 +335,35 @@ fn apply_vendored_patches(manifest_dir: &Path, sd_cpp_dir: &Path) {
         println!("cargo:warning=applied sd.cpp patch: {name}");
     }
 
-    // Postcondition, independent of git's exit codes: a patch that applied to
-    // the wrong hunk, or a refactor that moved the protected-token list, must
-    // not produce a silently broken build.
+    check_feed_forward_postcondition(sd_cpp_dir);
+}
+
+/// Postcondition, independent of git's exit codes and of whether any patch was
+/// applied: a patch that landed on the wrong hunk, a refactor that moved the
+/// protected-token list, and a deleted patch file all reach here.
+fn check_feed_forward_postcondition(sd_cpp_dir: &Path) {
     let target = sd_cpp_dir.join(FEED_FORWARD_FILE);
     let source = std::fs::read_to_string(&target)
         .unwrap_or_else(|e| panic!("failed to read {} after patching: {e}", target.display()));
 
-    if !source.contains(FEED_FORWARD_TOKEN) {
-        panic!(
-            "vendored sd.cpp patches reported success but {FEED_FORWARD_FILE} does not contain \
-             {FEED_FORWARD_TOKEN} — the LoRA FFN fix is not in this build"
-        );
-    }
+    // Corruption is checked FIRST: a tree carrying conflict markers usually also
+    // fails the token check, and "the tree is corrupt, restore it" is the
+    // actionable answer — "the fix is not present" would send the reader off to
+    // rebase a patch that is fine.
     if source.contains("<<<<<<<") || source.contains(">>>>>>>") {
         panic!(
             "{FEED_FORWARD_FILE} contains merge conflict markers; the vendored tree is corrupt. \
              Run: git -C crates/sd-sys/stable-diffusion.cpp checkout -- {FEED_FORWARD_FILE} \
              and rebuild"
+        );
+    }
+    if !source.contains(FEED_FORWARD_TOKEN) {
+        panic!(
+            "{FEED_FORWARD_FILE} does not contain {FEED_FORWARD_TOKEN} — the LoRA FFN fix is not \
+             in this build, so LoRA feed-forward tensors would be silently dropped. Either a \
+             patch applied to the wrong hunk, or `crates/sd-sys/patches/` no longer carries the \
+             fix; deleting that patch is only correct once the token is present upstream. Set \
+             BLINK_SKIP_SD_PATCHES=1 to build without the fix deliberately."
         );
     }
 }
