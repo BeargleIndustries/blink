@@ -1,0 +1,146 @@
+CACHE: WARM — page cache not cleared (no reboot/standby-list tool available in-session)
+Captured: 2026-09-03, commit e445b2c, RTX 4070 SUPER 12 GB, Z-Image Turbo Q8 512x512 4 steps seed 42, BLINK_TEST_PLACEMENT unset (auto_fit default).
+Load-duration evidence for the cold case is docs/upgrade-research-2026-09.md section 4b (154 s cold vs ~6 s warm); not re-measured here.
+---
+warning: sd-sys@0.1.0: sd.cpp patch already applied: 0001-feed_forward-protected-token.patch
+warning: sd-sys@0.1.0: GPU backend auto-detected: CUDA (via CUDA_PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.2)
+   Compiling sd-wrapper v0.1.0 (C:\Users\Brad\Documents\Claude Code\blink\crates\sd-wrapper)
+warning: value assigned to `decoded_rgb` is never read
+  --> crates\sd-wrapper\src\video.rs:74:36
+   |
+74 |     let mut decoded_rgb: Vec<u8> = Vec::new();
+   |                                    ^^^^^^^^^^
+   |
+   = help: maybe it is overwritten before being read?
+   = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sd-wrapper` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.51s
+     Running tests\smoke_generation.rs (target\debug\deps\smoke_generation-ddbe11dad395c6ce.exe)
+
+running 1 test
+test zimage_txt2img_produces_a_real_image ... [smoke] placement=auto_fit (auto_fit=true, low_memory=false)
+[blink] Inference thread started, loading model: C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf
+[sd.cpp DEBUG] model_loader.cpp:168  - using 4 threads for model loading
+[sd.cpp] stable-diffusion.cpp:721  - loading diffusion model from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf'
+[sd.cpp] model_loader.cpp:176  - load C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf using gguf format
+[sd.cpp DEBUG] model_loader.cpp:228  - init from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf'
+[sd.cpp] stable-diffusion.cpp:778  - loading llm from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf'
+[sd.cpp] model_loader.cpp:176  - load C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf using gguf format
+[sd.cpp DEBUG] model_loader.cpp:228  - init from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf'
+[sd.cpp] stable-diffusion.cpp:792  - loading vae from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\ae.safetensors'
+[sd.cpp] model_loader.cpp:182  - load C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\ae.safetensors using safetensors format
+[sd.cpp DEBUG] model_loader.cpp:256  - init from 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\ae.safetensors', prefix = 'vae.'
+[sd.cpp] stable-diffusion.cpp:909  - Version: Z-Image
+[sd.cpp] ggml_extend.hpp:66   - ggml_cuda_init: found 1 CUDA devices (Total VRAM: 12281 MiB):
+[sd.cpp] ggml_extend.hpp:66   -   Device 0: NVIDIA GeForce RTX 4070 SUPER, compute capability 8.9, VMM: yes, VRAM: 12281 MiB
+[sd.cpp] backend_fit.cpp:240  - auto-fit plan (time-share: params load per phase and free after):
+[sd.cpp] backend_fit.cpp:241  -   devices:
+[sd.cpp] backend_fit.cpp:245  -     CUDA0        NVIDIA GeForce RTX 4070 SUPER    free  11069 MiB, budget  10557 MiB
+[sd.cpp] backend_fit.cpp:247  -   components:
+[sd.cpp] backend_fit.cpp:271  -     DiT          params   6272 MiB, compute reserve  2048 MiB -> CUDA0
+[sd.cpp] backend_fit.cpp:271  -     VAE          params    319 MiB, compute reserve  1024 MiB -> CUDA0
+[sd.cpp] backend_fit.cpp:271  -     Conditioner  params   2375 MiB, compute reserve  2048 MiB -> CUDA0
+[sd.cpp] backend_fit.cpp:362  - auto-fit: --backend "diffusion=CUDA0,te=CUDA0,vae=CUDA0" --params-backend "diffusion=disk,te=disk,vae=disk"
+[sd.cpp DEBUG] ggml_extend_backend.cpp:395  - Initializing backend: CUDA0
+[sd.cpp] stable-diffusion.cpp:960  - Weight type stat:                      f32: 640  |    q8_0: 202  |    q4_K: 216  |    q6_K: 37
+[sd.cpp] stable-diffusion.cpp:961  - Conditioner weight type stat:          f32: 145  |    q4_K: 216  |    q6_K: 37
+[sd.cpp] stable-diffusion.cpp:962  - Diffusion model weight type stat:      f32: 251  |    q8_0: 202
+[sd.cpp] stable-diffusion.cpp:963  - VAE weight type stat:                  f32: 244
+[sd.cpp DEBUG] stable-diffusion.cpp:965  - ggml tensor size = 432 bytes
+[sd.cpp DEBUG] model_loader.cpp:806  - using mmap for I/O
+[sd.cpp] model_loader.cpp:812  - using mmap for 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf'
+[sd.cpp DEBUG] model_loader.cpp:806  - using mmap for I/O
+[sd.cpp] model_loader.cpp:812  - using mmap for 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf'
+[sd.cpp DEBUG] model_loader.cpp:806  - using mmap for I/O
+[sd.cpp] model_loader.cpp:812  - using mmap for 'C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\ae.safetensors'
+[sd.cpp DEBUG] qwen2_tokenizer.cpp:14   - merges size 151387
+[sd.cpp DEBUG] qwen2_tokenizer.cpp:39   - vocab size: 151674
+[sd.cpp DEBUG] llm.hpp:326  - llm: num_layers = 36, vocab_size = 151936, hidden_size = 2560, intermediate_size = 9728
+[sd.cpp DEBUG] z_image.hpp:117  - z_image: num_layers = 30, num_refiner_layers = 2, hidden_size = 3840, num_heads = 30, num_kv_heads = 30, in_channels = 16, out_channels = 16
+[sd.cpp] stable-diffusion.cpp:1513 - using VAE for encoding / decoding
+[sd.cpp] auto_encoder_kl.hpp:527  - vae decoder: ch = 128
+[sd.cpp] stable-diffusion.cpp:1624 - Using flash attention
+[sd.cpp] stable-diffusion.cpp:1638 - Using flash attention in the diffusion model
+[sd.cpp DEBUG] stable-diffusion.cpp:1646 - validating model metadata
+[sd.cpp DEBUG] stable-diffusion.cpp:1705 - model metadata validated; weights will be prepared lazily
+[sd.cpp] stable-diffusion.cpp:1761 - total params memory size = 9988.08MB (VRAM 9988.08MB, RAM 0.00MB): text_encoders 3555.38MB(VRAM), diffusion_model 6272.71MB(VRAM), vae 160.00MB(VRAM), controlnet 0.00MB(N/A), extensions 0.00MB(N/A)
+[sd.cpp] stable-diffusion.cpp:1868 - running in FLOW mode
+[blink] Model loaded successfully
+[smoke] context loaded in 375.9968ms
+[blink] LoRA count: 0
+[blink] No LoRAs to apply
+[blink] sample_method=0, scheduler=0, steps=4, cfg=1
+[sd.cpp] stable-diffusion.cpp:5649 - generate_image 512x512
+[sd.cpp] stable-diffusion.cpp:3185 - Using 'z_image_omni' preset for reference images
+[sd.cpp] denoiser.hpp:1061 - get_sigmas with discrete scheduler
+[sd.cpp] stable-diffusion.cpp:4397 - sampling using Euler method
+[sd.cpp DEBUG] conditioner.hpp:1987 - parse '<|im_start|>user
+a red apple on a wooden table, studio lighting<|im_end|>
+<|im_start|>assistant
+' to [['<|im_start|>user
+', 1], ['a red apple on a wooden table, studio lighting', 1], ['<|im_end|>
+<|im_start|>assistant
+', 1], ]
+[sd.cpp DEBUG] bpe_tokenizer.cpp:208  - split prompt "<|im_start|>user
+" to 3 tokens ["<|im_start|>", "user", "Ċ", ]
+[sd.cpp DEBUG] bpe_tokenizer.cpp:208  - split prompt "a red apple on a wooden table, studio lighting" to 10 tokens ["a", "Ġred", "Ġapple", "Ġon", "Ġa", "Ġwooden", "Ġtable", ",", "Ġstudio", "Ġlighting", ]
+[sd.cpp DEBUG] bpe_tokenizer.cpp:208  - split prompt "<|im_end|>
+<|im_start|>assistant
+" to 5 tokens ["<|im_end|>", "Ċ", "<|im_start|>", "assistant", "Ċ", ]
+[sd.cpp DEBUG] model_loader.cpp:983  - loading 386/398 tensors from C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+[blink] Progress: step=0, total_steps=386, time=0.0s
+[blink] Progress: step=100, total_steps=386, time=0.0s
+[blink] Progress: step=265, total_steps=386, time=0.0s
+[blink] Progress: step=386, total_steps=386, time=0.0s
+[sd.cpp] model_loader.cpp:1243 - loading tensors completed, taking 0.98s (read: 0.30s, memcpy: 0.00s, convert: 0.07s, copy_to_backend: 0.16s)
+[sd.cpp DEBUG] model_manager.cpp:409  - model manager prepared params backend buffer (3494.44 MB, 386 tensors, VRAM)
+[sd.cpp DEBUG] ggml_extend.hpp:2244 - qwen3 compute buffer size: 1.97 MB(VRAM)
+[sd.cpp DEBUG] conditioner.hpp:2882 - computing condition graph completed, taking 1070 ms
+[sd.cpp] stable-diffusion.cpp:5317 - get_learned_condition completed, taking 1.07s
+[sd.cpp DEBUG] model_manager.cpp:984  - model manager releasing params backend buffer (3494.44 MB, 386 tensors, VRAM)
+[sd.cpp] stable-diffusion.cpp:5700 - generating image: 1/1 - seed 42
+[blink] Progress: step=0, total_steps=4, time=0.0s
+[sd.cpp DEBUG] model_loader.cpp:983  - loading 452/453 tensors from C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\z_image_turbo-Q8_0.gguf
+[blink] Progress: step=0, total_steps=452, time=0.0s
+[blink] Progress: step=40, total_steps=452, time=0.0s
+[blink] Progress: step=106, total_steps=452, time=0.0s
+[blink] Progress: step=183, total_steps=452, time=0.0s
+[blink] Progress: step=249, total_steps=452, time=0.0s
+[blink] Progress: step=316, total_steps=452, time=0.0s
+[blink] Progress: step=391, total_steps=452, time=0.0s
+[blink] Progress: step=452, total_steps=452, time=0.0s
+[sd.cpp] model_loader.cpp:1243 - loading tensors completed, taking 1.43s (read: 0.78s, memcpy: 0.00s, convert: 0.00s, copy_to_backend: 0.52s)
+[sd.cpp DEBUG] model_manager.cpp:409  - model manager prepared params backend buffer (6272.75 MB, 452 tensors, VRAM)
+[sd.cpp DEBUG] ggml_extend.hpp:2244 - z_image compute buffer size: 173.39 MB(VRAM)
+[blink] Progress: step=1, total_steps=4, time=1.7s
+[blink] Progress: step=2, total_steps=4, time=0.2s
+[blink] Progress: step=3, total_steps=4, time=0.2s
+[blink] Progress: step=4, total_steps=4, time=0.2s
+[sd.cpp DEBUG] model_manager.cpp:984  - model manager releasing params backend buffer (6272.75 MB, 452 tensors, VRAM)
+[sd.cpp] stable-diffusion.cpp:5733 - sampling completed, taking 2.37s
+[sd.cpp] stable-diffusion.cpp:5747 - generating 1 latent images completed, taking 2.37s
+[sd.cpp] stable-diffusion.cpp:5342 - decoding 1 latents
+[sd.cpp DEBUG] model_loader.cpp:983  - loading 138/244 tensors from C:\Users\Brad\AppData\Roaming\com.beargle.blink\models\z-image\ae.safetensors
+[blink] Progress: step=0, total_steps=138, time=0.0s
+[blink] Progress: step=138, total_steps=138, time=0.0s
+[sd.cpp] model_loader.cpp:1243 - loading tensors completed, taking 0.21s (read: 0.02s, memcpy: 0.00s, convert: 0.02s, copy_to_backend: 0.01s)
+[sd.cpp DEBUG] model_manager.cpp:409  - model manager prepared params backend buffer ( 94.57 MB, 138 tensors, VRAM)
+[sd.cpp DEBUG] ggml_extend.hpp:2244 - vae compute buffer size: 1664.25 MB(VRAM)
+[sd.cpp DEBUG] model_manager.cpp:984  - model manager releasing params backend buffer ( 94.57 MB, 138 tensors, VRAM)
+[sd.cpp DEBUG] vae.hpp:318  - computing vae decode graph completed, taking 0.49s
+[sd.cpp] stable-diffusion.cpp:5408 - latent 1 decoded, taking 0.49s
+[sd.cpp] stable-diffusion.cpp:5412 - decode_first_stage completed, taking 0.49s
+[sd.cpp] stable-diffusion.cpp:5884 - generate_image completed in 3.95s
+[blink] Image result: 512x512, 3 channels, data_null=false, pixel_count=786432, data_ptr=0x24ef27f3b80
+[blink] First 24 bytes: [27, 28, 30, 23, 25, 29, 23, 25, 28, 24, 27, 30, 24, 25, 30, 25, 27, 31, 24, 27, 30, 24, 27, 31]
+[blink] Mid 24 bytes:   [190, 157, 126, 189, 156, 125, 189, 156, 125, 189, 155, 124, 188, 154, 122, 190, 155, 123, 190, 156, 124, 190, 157, 125]
+[blink] non-zero: 785432/786432
+[blink] First 4 bytes as f32: 0.00000000000000000000000051088028
+[smoke] generated in 3.95962s
+[smoke] rgba_fnv1a=cb2162f52e872c5b bytes=1048576
+[smoke] wrote C:\Users\Brad\AppData\Local\Temp\blink_smoke_zimage_auto_fit.png
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 5.52s
+
