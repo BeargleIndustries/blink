@@ -148,10 +148,14 @@ impl SdCppContext {
             // SD_TYPE_COUNT = auto-detect quantization from model file
             params.wtype = sd_sys::sd_type_t_SD_TYPE_COUNT;
 
-            // Performance settings
-            params.flash_attn = config.flash_attn;
-            params.diffusion_flash_attn = config.diffusion_flash_attn;
-            params.enable_mmap = config.enable_mmap;
+            // Performance settings. These were user toggles until parameter
+            // placement moved to sd.cpp's auto_fit; the values below are the ones
+            // PerfSettings::default() shipped, so behaviour is unchanged. They are
+            // sd.cpp internals a non-technical user cannot reason about, so they
+            // are no longer exposed in the UI.
+            params.flash_attn = true;
+            params.diffusion_flash_attn = true;
+            params.enable_mmap = true;
 
             params.lora_apply_mode = match config.lora_apply_mode {
                 LoraApplyMode::Auto => sd_sys::lora_apply_mode_t_LORA_APPLY_AUTO,
@@ -159,18 +163,20 @@ impl SdCppContext {
                 LoraApplyMode::AtRuntime => sd_sys::lora_apply_mode_t_LORA_APPLY_AT_RUNTIME,
             };
 
-            // CPU offload is now expressed as a `params_backend` assignment string
-            // rather than individual booleans. Keep the CString alive until after
-            // new_sd_ctx() returns — sd.cpp borrows the pointer during the call.
-            let params_backend_c = config
-                .params_backend_spec()
-                .map(|spec| CString::new(spec).map_err(|_| SdError::InvalidParams {
-                    reason: "params_backend spec contains interior NUL byte".into(),
-                }))
-                .transpose()?;
-            if let Some(ref pb) = params_backend_c {
-                log::info!("Parameter placement: params_backend={:?}", pb);
-                params.params_backend = pb.as_ptr();
+            // Parameter placement. `low_memory` and `auto_fit` are mutually
+            // exclusive by construction: sd.cpp's derive_backend_specs() overwrites
+            // params_backend whenever auto_fit is set, and warns that it is doing so.
+            //
+            // The `c"cpu"` literal has 'static lifetime, so the pointer sd.cpp
+            // borrows stays valid across new_sd_ctx() without any keep-alive dance.
+            if config.low_memory {
+                // Known-good pre-auto_fit placement: params in CPU RAM, compute on GPU.
+                // Measured ~2.4x faster than GPU-resident on a 12 GB card (research §4b).
+                params.params_backend = c"cpu".as_ptr();
+                log::info!("Parameter placement: low-memory mode (params_backend=cpu)");
+            } else if config.uses_auto_fit() {
+                params.auto_fit = true;
+                log::info!("Parameter placement: auto_fit (sd.cpp decides from measured VRAM)");
             }
 
             let model_display = config.model_path.as_deref()
@@ -803,16 +809,12 @@ mod tests {
             diffusion_model_path: None,
             llm_path: None,
             n_threads: 4,
-            flash_attn: false,
-            diffusion_flash_attn: false,
-            enable_mmap: true,
-            free_params_immediately: false,
-            keep_clip_on_cpu: false,
-            keep_vae_on_cpu: false,
-            offload_params_to_cpu: false,
+            auto_fit: true,
+            low_memory: false,
             control_net_path: None,
             taesd_path: None,
-            lora_apply_mode: LoraApplyMode::Auto,        };
+            lora_apply_mode: LoraApplyMode::Auto,
+        };
         // Match on the Result directly rather than calling unwrap_err(): that
         // requires the Ok type to implement Debug, and SdCppContext deliberately
         // does not (it wraps a raw sd_ctx_t pointer).

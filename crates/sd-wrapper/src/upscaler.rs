@@ -24,9 +24,10 @@ impl UpscalerContext {
             reason: "esrgan_path contains interior NUL byte".into(),
         })?;
 
-        // `offload_params_to_cpu` was removed from the C API; CPU placement is now
-        // expressed through the `backend` / `params_backend` assignment strings.
-        // Passing null for both keeps sd.cpp's default placement.
+        // CPU placement is expressed through the `backend` / `params_backend`
+        // assignment strings. Passing null for both keeps sd.cpp's default
+        // placement. The upscaler never constructs a `ContextConfig`, so it is
+        // unaffected by auto_fit / low-memory mode.
         let ctx = unsafe {
             sd_sys::new_upscaler_ctx(
                 path_c.as_ptr(),

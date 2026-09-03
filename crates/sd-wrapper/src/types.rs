@@ -26,24 +26,12 @@ pub struct ContextConfig {
     // Z-Image / LLM-encoder models
     pub llm_path: Option<String>,
     pub n_threads: i32,
-    // Performance options
-    pub flash_attn: bool,
-    pub diffusion_flash_attn: bool,
-    pub enable_mmap: bool,
-    /// Retained for API compatibility with callers. sd.cpp removed the
-    /// corresponding `free_params_immediately` context field, so this is
-    /// currently inert and does not affect generation.
-    pub free_params_immediately: bool,
-    // VRAM management — offload stages to CPU to save GPU memory.
-    //
-    // sd.cpp removed the individual `keep_*_on_cpu` / `offload_params_to_cpu`
-    // context fields in favour of a `params_backend` assignment string. These
-    // booleans are kept as the crate's public surface (callers auto-tune them
-    // from available VRAM) and are translated into that string by
-    // `ContextConfig::params_backend_spec`.
-    pub keep_clip_on_cpu: bool,
-    pub keep_vae_on_cpu: bool,
-    pub offload_params_to_cpu: bool,
+    /// Let sd.cpp place diffusion/TE/VAE from measured VRAM. Mutually exclusive
+    /// with an explicit params_backend — sd.cpp ignores the latter when this is set.
+    pub auto_fit: bool,
+    /// Escape hatch: force every parameter to CPU RAM (Blink's pre-auto_fit
+    /// behaviour). Overrides auto_fit.
+    pub low_memory: bool,
     // ControlNet model path
     pub control_net_path: Option<String>,
     // TAESD model path for live previews
@@ -53,30 +41,31 @@ pub struct ContextConfig {
 }
 
 impl ContextConfig {
-    /// Build the `params_backend` assignment string sd.cpp now expects, from the
-    /// CPU-offload booleans.
+    /// Whether sd.cpp should be asked to auto-fit parameter placement.
     ///
-    /// Ordering matters: sd.cpp reads the spec left to right, so a bare `cpu`
-    /// default is emitted first and per-module entries after it, letting the
-    /// specific assignments override the blanket one.
-    ///
-    /// Returns `None` when nothing should be offloaded, which leaves sd.cpp on
-    /// its own default placement.
-    pub fn params_backend_spec(&self) -> Option<String> {
-        let mut parts: Vec<&str> = Vec::new();
-        if self.offload_params_to_cpu {
-            parts.push("cpu");
-        }
-        if self.keep_clip_on_cpu {
-            parts.push("te=cpu");
-        }
-        if self.keep_vae_on_cpu {
-            parts.push("vae=cpu");
-        }
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(","))
+    /// `low_memory` wins: sd.cpp's `derive_backend_specs()` overwrites
+    /// `params_backend` whenever `auto_fit` is set, so the two must never be
+    /// requested together.
+    pub fn uses_auto_fit(&self) -> bool {
+        !self.low_memory && self.auto_fit
+    }
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            model_path: None,
+            vae_path: None,
+            clip_l_path: None,
+            t5xxl_path: None,
+            diffusion_model_path: None,
+            llm_path: None,
+            n_threads: 4,
+            auto_fit: true,
+            low_memory: false,
+            control_net_path: None,
+            taesd_path: None,
+            lora_apply_mode: LoraApplyMode::Auto,
         }
     }
 }
@@ -169,6 +158,26 @@ mod tests {
         assert_eq!(params.height, 512);
         assert_eq!(params.steps, 20);
         assert!(params.cfg_scale > 0.0);
+    }
+
+    #[test]
+    fn context_config_defaults_to_auto_fit() {
+        let config = ContextConfig::default();
+        assert!(config.auto_fit);
+        assert!(!config.low_memory);
+        assert!(config.uses_auto_fit());
+    }
+
+    #[test]
+    fn low_memory_overrides_auto_fit() {
+        let config = ContextConfig {
+            low_memory: true,
+            ..ContextConfig::default()
+        };
+        // auto_fit is still true, but low_memory wins — sd.cpp must be given
+        // params_backend=cpu and never auto_fit, since auto_fit would overwrite it.
+        assert!(config.auto_fit);
+        assert!(!config.uses_auto_fit());
     }
 
     #[test]

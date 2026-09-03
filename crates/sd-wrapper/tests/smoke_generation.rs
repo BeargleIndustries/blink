@@ -164,12 +164,38 @@ fn model_dir() -> PathBuf {
     PathBuf::from(appdata).join("com.beargle.blink").join("models")
 }
 
+/// The parameter placement a timing run is exercising.
+struct Placement {
+    label: &'static str,
+    auto_fit: bool,
+    low_memory: bool,
+}
+
+/// Read `BLINK_TEST_PLACEMENT`: `auto_fit` (default) | `low_memory` | `resident`.
+///
+/// This is the knob the item-2 measurement gate alternates between. `resident`
+/// means neither flag, i.e. sd.cpp's own default placement.
+fn placement_from_env() -> Placement {
+    match std::env::var("BLINK_TEST_PLACEMENT").as_deref() {
+        Ok("low_memory") => Placement { label: "low_memory", auto_fit: false, low_memory: true },
+        Ok("resident") => Placement { label: "resident", auto_fit: false, low_memory: false },
+        Ok("auto_fit") | Err(_) => Placement { label: "auto_fit", auto_fit: true, low_memory: false },
+        Ok(other) => panic!(
+            "BLINK_TEST_PLACEMENT={other:?} is not one of auto_fit | low_memory | resident"
+        ),
+    }
+}
+
 /// Generate a real image through the migrated FFI path.
 ///
-/// Z-Image is deliberately chosen: it is one of the architectures for which Blink
-/// enables `offload_params_to_cpu`, so this exercises the `params_backend` string
-/// that replaced the removed CPU-offload context fields — the riskiest part of the
-/// sd.cpp bump.
+/// Z-Image is deliberately chosen: it is the stack Blink used to force onto the CPU
+/// with an architecture-name rule, so it is the one whose parameter placement the
+/// move to sd.cpp's `auto_fit` actually changes.
+///
+/// `BLINK_TEST_PLACEMENT` selects the placement under test:
+/// `auto_fit` (default) — sd.cpp decides from measured VRAM;
+/// `low_memory` — Blink's pre-auto_fit behaviour, `params_backend=cpu`;
+/// `resident` — neither, i.e. sd.cpp's own default placement.
 #[test]
 #[ignore = "requires a downloaded Z-Image model and a GPU"]
 fn zimage_txt2img_produces_a_real_image() {
@@ -188,6 +214,7 @@ fn zimage_txt2img_produces_a_real_image() {
         );
     }
 
+    let placement = placement_from_env();
     let config = ContextConfig {
         model_path: None,
         vae_path: Some(vae.to_string_lossy().into_owned()),
@@ -196,28 +223,17 @@ fn zimage_txt2img_produces_a_real_image() {
         diffusion_model_path: Some(diffusion.to_string_lossy().into_owned()),
         llm_path: Some(llm.to_string_lossy().into_owned()),
         n_threads: 4,
-        flash_attn: true,
-        diffusion_flash_attn: true,
-        enable_mmap: true,
-        free_params_immediately: false,
-        keep_clip_on_cpu: false,
-        keep_vae_on_cpu: false,
-        // Mirrors what src-tauri/src/commands/models.rs sets for z-image.
-        // Set BLINK_TEST_OFFLOAD=0 to compare against keeping params on the GPU.
-        offload_params_to_cpu: std::env::var("BLINK_TEST_OFFLOAD").as_deref() != Ok("0"),
+        auto_fit: placement.auto_fit,
+        low_memory: placement.low_memory,
         control_net_path: None,
         taesd_path: None,
-        lora_apply_mode: LoraApplyMode::Auto,    };
+        lora_apply_mode: LoraApplyMode::Auto,
+    };
 
-    // Sanity-check the translation that replaced the removed offload fields.
-    let offload = config.offload_params_to_cpu;
-    let expected_spec = if offload { Some("cpu") } else { None };
-    assert_eq!(
-        config.params_backend_spec().as_deref(),
-        expected_spec,
-        "params_backend spec did not match the offload setting"
+    eprintln!(
+        "[smoke] placement={} (auto_fit={}, low_memory={})",
+        placement.label, config.auto_fit, config.low_memory
     );
-    eprintln!("[smoke] offload_params_to_cpu={}", config.offload_params_to_cpu);
 
     let started = std::time::Instant::now();
     let ctx = SdContext::new(config).expect("failed to create sd.cpp context");
@@ -250,8 +266,8 @@ fn zimage_txt2img_produces_a_real_image() {
 
     // Write it out so the result can be eyeballed.
     // Name the file after the placement mode so successive runs do not overwrite
-    // each other — the two outputs need to be comparable side by side.
-    let suffix = if offload { "offload-cpu" } else { "gpu-resident" };
+    // each other — the outputs need to be comparable side by side.
+    let suffix = placement.label;
 
     // Checksum the raw RGBA (not the PNG) so the comparison is not affected by
     // encoder settings or metadata.
@@ -305,16 +321,12 @@ fn different_seeds_produce_different_images() {
         diffusion_model_path: Some(diffusion.to_string_lossy().into_owned()),
         llm_path: Some(llm.to_string_lossy().into_owned()),
         n_threads: 4,
-        flash_attn: true,
-        diffusion_flash_attn: true,
-        enable_mmap: true,
-        free_params_immediately: false,
-        keep_clip_on_cpu: false,
-        keep_vae_on_cpu: false,
-        offload_params_to_cpu: true,
+        auto_fit: true,
+        low_memory: false,
         control_net_path: None,
         taesd_path: None,
-        lora_apply_mode: LoraApplyMode::Auto,    };
+        lora_apply_mode: LoraApplyMode::Auto,
+    };
 
     let ctx = SdContext::new(config).expect("failed to create sd.cpp context");
 
@@ -431,13 +443,8 @@ fn lora_strength_probe() {
                 .into_owned(),
         ),
         n_threads: 4,
-        flash_attn: true,
-        diffusion_flash_attn: true,
-        enable_mmap: true,
-        free_params_immediately: false,
-        keep_clip_on_cpu: false,
-        keep_vae_on_cpu: false,
-        offload_params_to_cpu: true,
+        auto_fit: true,
+        low_memory: false,
         control_net_path: None,
         taesd_path: None,
         // BLINK_TEST_LORA_MODE=immediate|runtime|auto (default auto)

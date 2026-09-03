@@ -74,13 +74,7 @@ const App: Component = () => {
   const [enhancedNegativePrompt, setEnhancedNegativePrompt] = createSignal<string | null>(null);
 
   const [perfSettings, setPerfSettings] = createSignal<PerfSettings>({
-    flash_attn: true,
-    diffusion_flash_attn: true,
-    enable_mmap: true,
-    free_params_immediately: false,
-    keep_clip_on_cpu: false,
-    keep_vae_on_cpu: false,
-    offload_params_to_cpu: false,
+    low_memory: false,
   });
 
   // Generation settings

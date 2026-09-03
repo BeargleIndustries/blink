@@ -60,7 +60,7 @@ pub async fn save_perf_settings(state: State<'_, AppState>, settings: PerfSettin
     let store = state.app_handle.store("settings.json").map_err(|e| e.to_string())?;
     store.set("perf_settings", serde_json::to_value(&settings).map_err(|e| e.to_string())?);
     store.save().map_err(|e| e.to_string())?;
-    log::info!("Perf settings saved: flash_attn={}, mmap={}", settings.flash_attn, settings.enable_mmap);
+    log::info!("Perf settings saved: low_memory={}", settings.low_memory);
     Ok(())
 }
 

@@ -90,13 +90,7 @@ export interface AppSettings {
 }
 
 export interface PerfSettings {
-  flash_attn: boolean;
-  diffusion_flash_attn: boolean;
-  enable_mmap: boolean;
-  free_params_immediately: boolean;
-  keep_clip_on_cpu: boolean;
-  keep_vae_on_cpu: boolean;
-  offload_params_to_cpu: boolean;
+  low_memory: boolean;
 }
 
 export interface FileDownloadProgress {

@@ -655,7 +655,7 @@ pub async fn set_active_model(
         .clone();
 
     // Load perf settings from store (fall back to defaults)
-    let mut perf = state.app_handle.store("settings.json")
+    let perf = state.app_handle.store("settings.json")
         .ok()
         .and_then(|store| store.get("perf_settings"))
         .and_then(|val| serde_json::from_value::<PerfSettings>(val).ok())
@@ -684,17 +684,6 @@ pub async fn set_active_model(
                 taesd_path: None,
             };
 
-            // Perf auto-adjustment for multi-file custom models
-            if let Some(ref arch) = model_status.architecture {
-                match arch.as_str() {
-                    "flux" | "flux-kontext" | "z-image" => {
-                        perf.offload_params_to_cpu = true;
-                        eprintln!("[blink] Auto-enabled offload-to-cpu for custom {} model", arch);
-                    }
-                    _ => {}
-                }
-            }
-
             state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
             let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
             *active = Some(model_id);
@@ -715,17 +704,6 @@ pub async fn set_active_model(
                 control_net_path: None,
                 taesd_path: None,
             };
-
-            // Perf auto-adjustment for single-file custom models with known architecture
-            if let Some(ref arch) = model_status.architecture {
-                match arch.as_str() {
-                    "flux" | "flux-kontext" | "z-image" => {
-                        perf.offload_params_to_cpu = true;
-                        eprintln!("[blink] Auto-enabled offload-to-cpu for custom {} model", arch);
-                    }
-                    _ => {}
-                }
-            }
 
             state.load_model(paths, Some(perf)).map_err(|e| e.to_string())?;
             let mut active = state.active_model.lock().map_err(|e| e.to_string())?;
@@ -789,26 +767,9 @@ pub async fn set_active_model(
         }
     };
 
-    // Auto-adjust perf settings based on model architecture.
-    // Reset architecture-specific overrides first so switching models doesn't carry over stale settings.
-    // (keep_vae_on_cpu produces black output — the CPU backend can't decode GPU latents correctly)
-    perf.offload_params_to_cpu = false;
-    perf.keep_clip_on_cpu = false;
-    perf.keep_vae_on_cpu = false;
-    perf.free_params_immediately = false;
-
-    let arch = &manifest_model.architecture;
-    match arch.as_str() {
-        "flux" | "flux-kontext" | "z-image" => {
-            // Large models that may exceed VRAM. Enable offload to swap weights
-            // through CPU RAM while keeping compute on GPU.
-            perf.offload_params_to_cpu = true;
-            eprintln!("[blink] Auto-enabled offload-to-cpu for {} architecture", arch);
-        }
-        // SD 1.5, SDXL, custom: defaults are fine (all GPU, no offload)
-        _ => {}
-    }
-
+    // Parameter placement is no longer keyed off the architecture name: sd.cpp's
+    // auto_fit measures the actual VRAM on the actual card. `perf` now carries
+    // only the user's low-memory choice, exactly as loaded from the store.
     state.load_model(paths, Some(perf))
         .map_err(|e| e.to_string())?;
 

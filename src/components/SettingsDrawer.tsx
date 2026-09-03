@@ -414,49 +414,10 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
           </div>
           <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
             <ToggleOption
-              label="Flash Attention"
-              tooltip="Faster inference with lower memory usage. Recommended for all GPUs."
-              checked={props.perfSettings.flash_attn}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, flash_attn: v, diffusion_flash_attn: v })}
-            />
-            <ToggleOption
-              label="Memory-Mapped Loading"
-              tooltip="Faster model loading via mmap. Recommended."
-              checked={props.perfSettings.enable_mmap}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, enable_mmap: v })}
-            />
-            <div style={{
-              "border-top": "1px solid var(--border)",
-              "padding-top": "8px",
-              "margin-top": "4px",
-            }}>
-              <span style={{ "font-size": "11px", color: "var(--warning)", "font-weight": "600" }}>
-                VRAM Saving — only enable if models won't fit in GPU memory
-              </span>
-            </div>
-            <ToggleOption
-              label="Offload to CPU"
-              tooltip="Offload model params to CPU RAM. SIGNIFICANTLY slower. Only for models that exceed your VRAM."
-              checked={props.perfSettings.offload_params_to_cpu}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, offload_params_to_cpu: v })}
-            />
-            <ToggleOption
-              label="Free Params Early"
-              tooltip="Free weights after each stage. Slower but uses less peak VRAM."
-              checked={props.perfSettings.free_params_immediately}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, free_params_immediately: v })}
-            />
-            <ToggleOption
-              label="CLIP on CPU"
-              tooltip="Run text encoder on CPU. Frees GPU VRAM but slower text processing."
-              checked={props.perfSettings.keep_clip_on_cpu}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, keep_clip_on_cpu: v })}
-            />
-            <ToggleOption
-              label="VAE on CPU"
-              tooltip="Run VAE on CPU. Frees GPU VRAM but slower image decode."
-              checked={props.perfSettings.keep_vae_on_cpu}
-              onChange={(v) => props.onPerfChange({ ...props.perfSettings, keep_vae_on_cpu: v })}
+              label="Low-memory mode"
+              tooltip="Keep model weights in system RAM instead of video memory. Try this if generation fails with an out-of-memory error."
+              checked={props.perfSettings.low_memory}
+              onChange={(v) => props.onPerfChange({ low_memory: v })}
             />
           </div>
         </div>

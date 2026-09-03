@@ -4,30 +4,20 @@ use tauri::{AppHandle, Manager};
 use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// The user's only remaining placement choice. Everything else sd.cpp decides
+/// for itself from measured VRAM (`ContextConfig::auto_fit`).
+///
+/// `#[serde(default)]` is load-bearing for the migration: a `settings.json`
+/// written by an older build has none of these keys, and the read path in
+/// `models.rs` is `serde_json::from_value(...).ok().unwrap_or_default()`, which
+/// swallows a deserialization failure and makes it indistinguishable from "no
+/// settings stored". Without the attribute the user's choice would be silently
+/// discarded rather than erroring. Covered by
+/// `perf_settings_deserializes_legacy_json`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PerfSettings {
-    pub flash_attn: bool,
-    pub diffusion_flash_attn: bool,
-    pub enable_mmap: bool,
-    pub free_params_immediately: bool,
-    pub keep_clip_on_cpu: bool,
-    pub keep_vae_on_cpu: bool,
     #[serde(default)]
-    pub offload_params_to_cpu: bool,
-}
-
-impl Default for PerfSettings {
-    fn default() -> Self {
-        Self {
-            flash_attn: true,
-            diffusion_flash_attn: true,
-            enable_mmap: true,
-            free_params_immediately: false,
-            keep_clip_on_cpu: false,
-            keep_vae_on_cpu: false,
-            offload_params_to_cpu: false,
-        }
-    }
+    pub low_memory: bool,
 }
 
 pub struct AppState {
@@ -84,13 +74,8 @@ impl AppState {
             diffusion_model_path: paths.diffusion_model_path,
             llm_path: paths.llm_path,
             n_threads: num_cpus(),
-            flash_attn: perf.flash_attn,
-            diffusion_flash_attn: perf.diffusion_flash_attn,
-            enable_mmap: perf.enable_mmap,
-            free_params_immediately: perf.free_params_immediately,
-            keep_clip_on_cpu: perf.keep_clip_on_cpu,
-            keep_vae_on_cpu: perf.keep_vae_on_cpu,
-            offload_params_to_cpu: perf.offload_params_to_cpu,
+            auto_fit: !perf.low_memory,
+            low_memory: perf.low_memory,
             control_net_path: paths.control_net_path,
             taesd_path: paths.taesd_path,
             lora_apply_mode: LoraApplyMode::Auto,
@@ -109,4 +94,30 @@ fn num_cpus() -> i32 {
     std::thread::available_parallelism()
         .map(|n| n.get() as i32)
         .unwrap_or(4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A `settings.json` written before parameter placement moved to sd.cpp's
+    /// auto_fit carries the seven old keys and none of the new one. It must
+    /// still *deserialize* — `models.rs` calls `.ok().unwrap_or_default()`, so a
+    /// failure here would be silently swallowed and look identical to a user who
+    /// has never opened Settings.
+    #[test]
+    fn perf_settings_deserializes_legacy_json() {
+        let legacy = serde_json::json!({
+            "flash_attn": true,
+            "diffusion_flash_attn": true,
+            "enable_mmap": true,
+            "free_params_immediately": false,
+            "keep_clip_on_cpu": false,
+            "keep_vae_on_cpu": false,
+            "offload_params_to_cpu": true,
+        });
+        let parsed = serde_json::from_value::<PerfSettings>(legacy);
+        let settings = parsed.expect("legacy perf settings must deserialize, not fall back to Default");
+        assert!(!settings.low_memory);
+    }
 }
