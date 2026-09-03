@@ -75,6 +75,13 @@ unnecessary; keep at most one "Low-memory mode" escape hatch.
 > "Advanced" section in `SettingsDrawer.tsx` — the principle in `CLAUDE.md` currently has
 > nowhere to put things). Cost of disk placement: ~66 % of each warm generation is weight
 > re-streaming — see research §4b addendum. Cold-start under disk placement is unmeasured.
+>
+> **Corrected after simulating smaller cards (research §4b.2):** below ~9 GB of free VRAM
+> `auto_fit`'s plan moves the diffusion *compute* to the CPU — 271 s per image instead of 4 s —
+> with no warning. The old architecture-name rule was accidentally right there. Blink now decides
+> per load: if the model's file size plus sd.cpp's 2 GB compute reserve will not fit in free VRAM,
+> it forces low-memory placement (weights in RAM, compute on GPU, ~8 s) itself, and logs the
+> reason. The toggle remains as the user override. Not yet verified on real 8/6/4 GB hardware.
 
 ### 1.3 Model-loading is a phase, not a hang
 First generation after boot took **154 s** vs ~6 s warm — almost all of it reading 8.5 GB of

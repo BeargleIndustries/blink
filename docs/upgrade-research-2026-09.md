@@ -205,6 +205,42 @@ deterministic — `sample()` emits an opening `pretty_progress(0, steps, 0)` tic
 (`stable-diffusion.cpp:2643`) *before* the lazy load, on every model and step count. The phase
 rule now reads the step index (`step == 0` ⇒ loading). See `docs/traces/`.
 
+### 4b.2 — the VRAM cliff: `auto_fit` is catastrophic below ~9 GB, and Blink now guards it
+
+Simulated smaller cards on the same RTX 4070 SUPER by capping the budget sd.cpp's auto_fit sees
+(`max_vram`, commit `26b3629`). Z-Image Turbo Q8, 512x512, 4 steps, seed 42, one generation per
+process:
+
+| VRAM budget | `auto_fit` placement derived | gen time | `low_memory` (weights in RAM, compute on GPU) |
+|---|---|---|---|
+| 12 GB (uncapped) | diffusion/te/vae on GPU, params disk-backed | 4.2 s | 5.2 s |
+| 9 GB | same | 4.4 s | — |
+| **8 GB** | **diffusion compute → CPU**, te/vae on GPU | **271 s** | ~8 s |
+| 6 GB | same | 277 s | — |
+| 4 GB | diffusion **and** te compute → CPU | 282 s | 8.1 s |
+| 3 GB | same | 283 s | 8.6 s |
+
+The cliff is sd.cpp's arithmetic: the diffusion params (6272 MiB) plus its 2048 MiB compute
+reserve must fit in free VRAM minus a 512 MiB margin. At 9 GiB that holds; at 8 GiB it does not,
+and auto_fit's plan keeps the weights off the GPU by taking the *math* off the GPU too — valid,
+silent, and 61x slower. `low_memory` never does that. So the 12 GB measurement gate in 4b
+passed honestly and was still the wrong question: it measured the one card where the new default
+is fine. The old architecture-name rule, which the reviews called hardware-blind, forced the
+8-second path for these models everywhere and was accidentally right below the cliff.
+
+Two side findings: output is byte-identical only while compute stays on CUDA — CPU kernels
+differ (`c2bea997…`, `404ac01c…`), so the FNV-1a hash is not a cross-placement oracle; and
+`low_memory`'s peak VRAM (≈4.3 GiB at a "4 GiB" cap) exceeds the cap, because under that path
+`max_vram` drives graph-cut segmentation rather than bounding allocation — so its success at
+small caps is not proof it fits a real 4 GB card.
+
+**Guard shipped:** `AppState::load_model` now decides placement per load: if the primary model's
+file size + 2048 MiB > free VRAM − 512 MiB, or free VRAM cannot be read, Blink sets `low_memory`
+itself and logs why; otherwise auto_fit. Never persisted; the user's explicit Low-memory setting
+still wins. Unit-tested against the measured cliff (`state.rs`, `placement_tests`). Real 8 GB /
+6 GB / 4 GB hardware remains unmeasured; the simulation says the guard picks the 8-second path
+there, and that low_memory's fit on a true 4 GB card is not established.
+
 ## 4c. LoRA on Z-Image: two separate bugs, one fixable
 
 Investigated on branch `feat/sdcpp-bump-2026-09` with `crates/sd-wrapper/tests/smoke_generation.rs`

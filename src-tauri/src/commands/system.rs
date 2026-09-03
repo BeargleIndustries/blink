@@ -24,7 +24,7 @@ pub fn get_system_info() -> SystemInfo {
     }
 }
 
-fn detect_gpu_info() -> (Option<String>, Option<u64>, Option<u64>) {
+pub(crate) fn detect_gpu_info() -> (Option<String>, Option<u64>, Option<u64>) {
     // Try nvidia-smi for NVIDIA GPUs
     if let Ok(output) = std::process::Command::new("nvidia-smi")
         .args(["--query-gpu=name,memory.total,memory.free", "--format=csv,noheader,nounits"])

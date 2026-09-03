@@ -4,8 +4,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode, CancelHandle};
 use serde::{Deserialize, Serialize};
 
-/// The user's only remaining placement choice. Everything else sd.cpp decides
-/// for itself from measured VRAM (`ContextConfig::auto_fit`).
+/// The user's only remaining placement choice. When this is off, Blink still
+/// forces low-memory placement itself if the model will not fit the GPU
+/// (see `low_memory_for`); otherwise sd.cpp's auto_fit plans placement.
 ///
 /// `#[serde(default)]` is load-bearing for the migration: a `settings.json`
 /// written by an older build has none of these keys, and the read path in
@@ -80,6 +81,22 @@ impl AppState {
 
     pub fn load_model(&self, paths: ModelPaths, perf: Option<PerfSettings>) -> Result<(), sd_wrapper::SdError> {
         let perf = perf.unwrap_or_default();
+
+        // Decide placement per load, never persisted. auto_fit is the fast path
+        // only while the main model fits on the GPU; below that, sd.cpp's plan
+        // moves the diffusion *compute* to the CPU and a 4 s image takes 4.5 min
+        // (measured at 8/6/4/3 GiB budgets — research doc 4b). low_memory keeps
+        // compute on the GPU and only parks the weights in RAM: 8 s at the same
+        // budgets. So we make that call here instead of trusting the plan.
+        let primary_mb = primary_model_mb(&paths);
+        let (_, _, free_mb) = crate::commands::system::detect_gpu_info();
+        let (low_memory, reason) = low_memory_for(perf.low_memory, free_mb, primary_mb);
+        log::info!(
+            "placement: {} ({})",
+            if low_memory { "low_memory" } else { "auto_fit" },
+            reason
+        );
+
         let config = ContextConfig {
             model_path: paths.model_path,
             vae_path: paths.vae_path,
@@ -88,8 +105,8 @@ impl AppState {
             diffusion_model_path: paths.diffusion_model_path,
             llm_path: paths.llm_path,
             n_threads: num_cpus(),
-            auto_fit: !perf.low_memory,
-            low_memory: perf.low_memory,
+            auto_fit: !low_memory,
+            low_memory,
             max_vram: None,
             control_net_path: paths.control_net_path,
             taesd_path: paths.taesd_path,
@@ -129,6 +146,148 @@ impl AppState {
         })?;
         *lock = Some(ctx);
         Ok(())
+    }
+}
+
+/// sd.cpp's auto_fit keeps this much VRAM aside for compute buffers before it
+/// will place a model's parameters on the GPU (observed: 6272 MiB of Z-Image
+/// weights fit a 9 GiB budget and not an 8 GiB one — 6272 + 2048 = 8320).
+const SDCPP_COMPUTE_RESERVE_MB: u64 = 2048;
+/// sd.cpp subtracts this from the device's free VRAM before budgeting.
+const SDCPP_FREE_MARGIN_MB: u64 = 512;
+
+/// Whether to force weights into CPU RAM (`low_memory`) rather than let
+/// sd.cpp's auto_fit plan placement.
+///
+/// Returns the decision and a one-line reason for the log. The user's explicit
+/// choice always wins. When free VRAM cannot be read (no `nvidia-smi`), the
+/// safe answer is `low_memory`: it costs ~1 s per image on a card that would
+/// have fit, and saves minutes on one that would not.
+pub(crate) fn low_memory_for(
+    user_low_memory: bool,
+    free_vram_mb: Option<u64>,
+    primary_model_mb: u64,
+) -> (bool, String) {
+    if user_low_memory {
+        return (true, "user setting".to_string());
+    }
+    let need_mb = primary_model_mb + SDCPP_COMPUTE_RESERVE_MB;
+    match free_vram_mb {
+        None => (
+            true,
+            format!("free VRAM unknown; model needs ~{} MiB on the GPU", need_mb),
+        ),
+        Some(free) => {
+            let usable = free.saturating_sub(SDCPP_FREE_MARGIN_MB);
+            if usable >= need_mb {
+                (
+                    false,
+                    format!("{} MiB usable >= {} MiB needed", usable, need_mb),
+                )
+            } else {
+                (
+                    true,
+                    format!(
+                        "auto: {} MiB usable < {} MiB needed; auto_fit would move diffusion compute to CPU",
+                        usable, need_mb
+                    ),
+                )
+            }
+        }
+    }
+}
+
+/// Size on disk, in MiB, of the model file that has to fit on the GPU — the
+/// diffusion model for split stacks, else the single checkpoint. A quantized
+/// GGUF's file size is a close proxy for its resident size. 0 if unreadable.
+fn primary_model_mb(paths: &ModelPaths) -> u64 {
+    let candidate = paths
+        .diffusion_model_path
+        .as_deref()
+        .or(paths.model_path.as_deref());
+    candidate
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len() / (1024 * 1024))
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod placement_tests {
+    use super::*;
+
+    const ZIMAGE_Q8_MB: u64 = 6272;
+
+    #[test]
+    fn user_choice_always_wins() {
+        let (low, reason) = low_memory_for(true, Some(20_000), 1_000);
+        assert!(low);
+        assert_eq!(reason, "user setting");
+    }
+
+    #[test]
+    fn twelve_gb_card_fits_zimage_so_auto_fit() {
+        // nvidia-smi free on the reference machine while idle.
+        let (low, _) = low_memory_for(false, Some(11_069), ZIMAGE_Q8_MB);
+        assert!(!low);
+    }
+
+    #[test]
+    fn nine_gib_budget_fits_but_eight_does_not() {
+        // The measured cliff: sd.cpp kept everything on CUDA0 at 9 GiB and moved
+        // diffusion compute to CPU at 8 GiB.
+        let (low_at_9, _) = low_memory_for(false, Some(9 * 1024), ZIMAGE_Q8_MB);
+        let (low_at_8, reason) = low_memory_for(false, Some(8 * 1024), ZIMAGE_Q8_MB);
+        assert!(!low_at_9);
+        assert!(low_at_8);
+        assert!(reason.starts_with("auto:"), "reason was: {reason}");
+    }
+
+    #[test]
+    fn small_model_on_six_gb_card_stays_auto_fit() {
+        // SD 1.5 Q5 (~1.6 GB) on a 6 GB card: 6144 - 512 = 5632 >= 1600 + 2048.
+        let (low, _) = low_memory_for(false, Some(6_144), 1_600);
+        assert!(!low);
+    }
+
+    #[test]
+    fn small_model_on_four_gb_card_is_low_memory() {
+        // Same model on a 4 GB card: 4096 - 512 = 3584 < 3648. The compute
+        // reserve is what tips it; low_memory keeps compute on the GPU and only
+        // parks the weights in RAM, so this is the safe side of the line.
+        let (low, _) = low_memory_for(false, Some(4_096), 1_600);
+        assert!(low);
+    }
+
+    #[test]
+    fn unknown_vram_is_low_memory() {
+        let (low, reason) = low_memory_for(false, None, ZIMAGE_Q8_MB);
+        assert!(low);
+        assert!(reason.contains("unknown"));
+    }
+
+    #[test]
+    fn boundary_is_inclusive() {
+        // usable == need exactly → fits.
+        let need = ZIMAGE_Q8_MB + SDCPP_COMPUTE_RESERVE_MB;
+        let (low, _) = low_memory_for(false, Some(need + SDCPP_FREE_MARGIN_MB), ZIMAGE_Q8_MB);
+        assert!(!low);
+        let (low, _) = low_memory_for(false, Some(need + SDCPP_FREE_MARGIN_MB - 1), ZIMAGE_Q8_MB);
+        assert!(low);
+    }
+
+    #[test]
+    fn primary_model_size_prefers_diffusion_model_and_tolerates_missing_files() {
+        let paths = ModelPaths {
+            model_path: Some("Z:/definitely/not/here.safetensors".into()),
+            vae_path: None,
+            clip_l_path: None,
+            t5xxl_path: None,
+            diffusion_model_path: Some("Z:/also/not/here.gguf".into()),
+            llm_path: None,
+            control_net_path: None,
+            taesd_path: None,
+        };
+        assert_eq!(primary_model_mb(&paths), 0);
     }
 }
 
