@@ -94,9 +94,16 @@ takes a minute"* with a real progress bar, then the step counter.
 > mid-step but cannot interrupt a weight load; the UI says so.
 
 ### 1.4 Native cancel
-`sd_cancel_generation()` now exists. Blink's cancel is an `AtomicBool` polled between steps;
-native cancel stops inside a step and inside model load. The 154 s cold load above is
-currently uncancellable — this fixes that.
+`sd_cancel_generation()` now exists. Blink's cancel was an `AtomicBool` read once pre-flight —
+it did nothing mid-generation.
+
+> **Shipped (`0b723c2`, hardened in `dfaa9f3`).** Cancel now stops sampling inside the current
+> step (measured: a 12-step run cancelled at 1.5 s returns ~0.65 s later instead of 3.9 s later)
+> and is no longer discarded when issued while queued or during pre-flight. Two corrections to
+> the original claim: it **cannot** interrupt a model load — sd.cpp's loader has zero cancel
+> checks — and the UI says so honestly; and the first shipped version silently disarmed itself
+> after the first model switch (a shared handle cleared by the old context's drop), caught in
+> code review and fixed with a regression test that fails against the old code.
 
 ### 1.5 Validate before load
 `sd_ctx_supports_image_generation()` / `_video_generation()` let Blink refuse a model that
