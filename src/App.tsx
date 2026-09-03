@@ -1,6 +1,6 @@
 import { Component, createSignal, onMount, onCleanup, Show, createEffect } from "solid-js";
 import { listen } from "@tauri-apps/api/event";
-import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, PerfSettings, FileDownloadProgress, LoraConfig } from "./lib/types";
+import type { ModelInfo, SystemInfo, GalleryItem, GenerationProgress, ModelLoadProgress, PerfSettings, FileDownloadProgress, LoraConfig } from "./lib/types";
 import {
   generateImage,
   cancelGeneration,
@@ -57,6 +57,13 @@ const App: Component = () => {
   const [currentStep, setCurrentStep] = createSignal(0);
   const [totalSteps, setTotalSteps] = createSignal(0);
   const [elapsed, setElapsed] = createSignal(0);
+  // What the engine is actually doing. Under sd.cpp's lazy weight loading a
+  // generation opens with a stretch of "loading" whose counter is tensors, not
+  // steps — on a first run that stretch is most of the wait.
+  const [phase, setPhase] = createSignal<"loading" | "sampling" | "decoding">("loading");
+  // The model a switch is currently loading; activeModel() still points at the
+  // old one until the switch completes.
+  const [loadingModelId, setLoadingModelId] = createSignal<string | null>(null);
   const [generatedImage, setGeneratedImage] = createSignal<string | null>(null);
   const [previewImage, setPreviewImage] = createSignal<string | null>(null);
   const [inputImage, setInputImage] = createSignal<string | null>(null);
@@ -125,6 +132,13 @@ const App: Component = () => {
   };
 
   const activeModel = () => models().find((m) => m.active) ?? null;
+  // The model the progress bar is talking about: during a switch that is the one
+  // being loaded, which is not yet the active one.
+  const progressModel = () => {
+    const id = loadingModelId();
+    if (id) return models().find((m) => m.id === id) ?? null;
+    return activeModel();
+  };
 
   const applyModelDefaults = (modelId: string, modelList?: ModelInfo[]) => {
     const list = modelList ?? models();
@@ -184,6 +198,15 @@ const App: Component = () => {
         setCurrentStep(event.payload.step);
         setTotalSteps(event.payload.total_steps);
         setElapsed(event.payload.elapsed_secs);
+        setPhase(event.payload.phase ?? "sampling");
+      }),
+
+      // Reading a model off disk used to be a completely silent window.
+      listen<ModelLoadProgress>("model:load_progress", (event) => {
+        setCurrentStep(event.payload.step);
+        setTotalSteps(event.payload.total_steps);
+        setElapsed(0);
+        setPhase("loading");
       }),
 
       listen<{ image_base64: string; width: number; height: number }>("generation:preview", (event) => {
@@ -343,9 +366,11 @@ const App: Component = () => {
       // next sampling step — it cannot interrupt a model load, because
       // model_loader.cpp never reads the cancel flag. Say so rather than implying
       // the work stopped instantly.
-      // TODO(item 3): read phase — when the phase signal lands, say
-      // "Cancelling — will stop once the model finishes loading" while loading.
-      setCancelNotice("Cancelling — this will stop at the next sampling step; it cannot interrupt a model load");
+      setCancelNotice(
+        phase() === "loading"
+          ? "Cancelling — will stop once the model finishes loading"
+          : "Cancelling — this will stop at the next sampling step",
+      );
       await cancelGeneration();
       setGenerating(false);
       setCurrentStep(0);
@@ -360,6 +385,11 @@ const App: Component = () => {
   const handleSelectModel = async (modelId: string) => {
     try {
       setModelLoading(true);
+      setLoadingModelId(modelId);
+      setPhase("loading");
+      setCurrentStep(0);
+      setTotalSteps(0);
+      setElapsed(0);
       setErrorMessage(null);
       await setActiveModel(modelId);
       const updated = await getModels();
@@ -373,6 +403,9 @@ const App: Component = () => {
       console.error("Failed to set active model:", err);
     } finally {
       setModelLoading(false);
+      setLoadingModelId(null);
+      setCurrentStep(0);
+      setTotalSteps(0);
     }
   };
 
@@ -682,8 +715,11 @@ const App: Component = () => {
         <ProgressBar
           step={currentStep()}
           totalSteps={totalSteps()}
-          visible={generating()}
+          visible={generating() || modelLoading()}
           elapsed={elapsed()}
+          phase={phase()}
+          modelLabel={progressModel()?.name}
+          modelBytes={progressModel()?.size_bytes}
         />
 
         <Show when={errorMessage()}>

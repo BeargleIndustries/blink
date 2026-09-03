@@ -227,6 +227,11 @@ unsafe extern "C" fn video_progress_trampoline(
             total_steps: steps as u32,
             elapsed_secs: time,
             preview: None,
+            // The video path has no load-phase detection: it installs this
+            // trampoline instead of the image one and never calls
+            // `progress::note_progress`, so reporting `Sampling` preserves
+            // today's behaviour rather than inventing a phase it does not track.
+            phase: crate::progress::Phase::Sampling,
         });
     }
 }

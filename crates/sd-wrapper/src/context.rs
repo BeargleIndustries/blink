@@ -48,13 +48,18 @@ impl SdContext {
             config,
             Arc::new(AtomicBool::new(false)),
             Arc::new(CancelHandle::new()),
+            None,
         )
     }
 
+    /// `load_progress_cb` receives the tensor-count progress emitted while the
+    /// model is read off disk, so switching models is not a dead UI. It is moved
+    /// onto the inference thread and handed to `SdCppContext::new`.
     pub fn with_cancel_flag(
         config: ContextConfig,
         cancel_flag: Arc<AtomicBool>,
         cancel_handle: Arc<CancelHandle>,
+        load_progress_cb: Option<ProgressCallback>,
     ) -> Result<Self, SdError> {
         let model_path = config.model_path.clone();
 
@@ -93,7 +98,11 @@ impl SdContext {
                 eprintln!("[blink] Inference thread started, loading model: {}", model_display);
 
                 // Initialize sd.cpp context (loads the model)
-                let cpp_ctx = match SdCppContext::new(&thread_config, &thread_cancel_handle) {
+                let cpp_ctx = match SdCppContext::new(
+                    &thread_config,
+                    &thread_cancel_handle,
+                    load_progress_cb,
+                ) {
                     Ok(ctx) => {
                         eprintln!("[blink] Model loaded successfully");
                         let _ = load_tx.send(Ok(()));

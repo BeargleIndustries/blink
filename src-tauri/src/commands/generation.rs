@@ -35,6 +35,10 @@ pub struct GenerationProgressEvent {
     pub step: u32,
     pub total_steps: u32,
     pub elapsed_secs: f32,
+    /// `"loading" | "sampling" | "decoding"`. Under sd.cpp's lazy weight loading
+    /// a generation can begin with several seconds — or, cold, a couple of
+    /// minutes — of `loading` events whose counts are tensors, not steps.
+    pub phase: String,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -120,6 +124,7 @@ pub async fn generate_image(
             step: update.step,
             total_steps: update.total_steps,
             elapsed_secs: update.elapsed_secs,
+            phase: update.phase.as_str().to_string(),
         });
     });
 

@@ -526,8 +526,8 @@ fn lora_strength_probe() {
 // process-wide environment is not test-local.
 
 /// The reference Z-Image Turbo Q8 stack, with `auto_fit` placement (item 2's default).
-fn zimage_cancel_context() -> sd_wrapper::SdContext {
-    use sd_wrapper::{ContextConfig, LoraApplyMode, SdContext};
+fn zimage_config() -> sd_wrapper::ContextConfig {
+    use sd_wrapper::{ContextConfig, LoraApplyMode};
 
     let dir = model_dir();
     let diffusion = dir.join("z-image").join("z_image_turbo-Q8_0.gguf");
@@ -542,7 +542,7 @@ fn zimage_cancel_context() -> sd_wrapper::SdContext {
         );
     }
 
-    SdContext::new(ContextConfig {
+    ContextConfig {
         model_path: None,
         vae_path: Some(vae.to_string_lossy().into_owned()),
         clip_l_path: None,
@@ -555,8 +555,11 @@ fn zimage_cancel_context() -> sd_wrapper::SdContext {
         control_net_path: None,
         taesd_path: None,
         lora_apply_mode: LoraApplyMode::Auto,
-    })
-    .expect("failed to create sd.cpp context")
+    }
+}
+
+fn zimage_cancel_context() -> sd_wrapper::SdContext {
+    sd_wrapper::SdContext::new(zimage_config()).expect("failed to create sd.cpp context")
 }
 
 fn zimage_cancel_params(steps: u32, seed: i64) -> sd_wrapper::GenerationParams {
@@ -767,4 +770,169 @@ fn cancel_during_model_switch_does_not_crash() {
     if let Some(reason) = degeneracy_reason(&image.data, image.width, image.height) {
         panic!("post-switch generation produced a degenerate image: {reason}");
     }
+}
+
+// ---------------------------------------------------------------------------
+// Load phase (item 3)
+// ---------------------------------------------------------------------------
+
+/// C2 clause (b) — the load-window progress callback is installed and torn down.
+///
+/// **Zero events fire here today, and that is the measured truth.** `eager_load`
+/// defaults to `false` (`stable-diffusion.cpp:252` — "Load all params into the
+/// params backend at model-load time **instead of lazily on first use**"), so
+/// `new_sd_ctx` maps and measures but streams no tensors and never calls
+/// `pretty_bytes_progress`. Confirmed twice: by this test, and by
+/// `docs/traces/phase-labelled-generation-6b3edaa.txt`, whose first
+/// `[blink] Progress:` line (88) comes long after `sampling using` (73).
+///
+/// So this asserts what is actually true of the mechanism: the callback is
+/// installed with `expected_steps == 0`, the context is created and dropped
+/// without panicking or leaking, and **any** event it does receive is labelled
+/// `Loading` rather than mislabelled as sampling. The day eager loading is
+/// adopted — or a stack loads eagerly — this becomes a real load-progress check
+/// with no edit beyond tightening the count.
+///
+/// C2 clause (a), the half that carries the user-visible value, is C4 clause 1:
+/// the lazy loads that used to render as fake generation progress are now
+/// labelled `loading` inside the generation.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn model_load_callback_installs_and_tears_down() {
+    use sd_wrapper::{CancelHandle, Phase, ProgressUpdate, SdContext};
+    use std::sync::atomic::AtomicBool;
+    use std::sync::{Arc, Mutex};
+
+    let started = std::time::Instant::now();
+    /// step, total_steps, the phase Blink assigned it, seconds since the call.
+    type LoadEvent = (u32, u32, Phase, f64);
+    let seen: Arc<Mutex<Vec<LoadEvent>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&seen);
+
+    let cb: sd_wrapper::progress::ProgressCallback = Box::new(move |u: ProgressUpdate| {
+        sink.lock()
+            .unwrap()
+            .push((u.step, u.total_steps, u.phase, started.elapsed().as_secs_f64()));
+    });
+
+    let ctx = SdContext::with_cancel_flag(
+        zimage_config(),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(CancelHandle::new()),
+        Some(cb),
+    )
+    .expect("failed to create sd.cpp context");
+    let load_secs = started.elapsed().as_secs_f64();
+
+    // Tear down while the callback is still owned by the inference thread.
+    drop(ctx);
+
+    let events = seen.lock().unwrap().clone();
+    eprintln!(
+        "[phase] context created in {load_secs:.2}s; load-window progress events: {}",
+        events.len()
+    );
+    for (step, total, phase, at) in &events {
+        eprintln!("[phase]   step={step}/{total} phase={phase:?} at {at:.2}s");
+    }
+
+    // Whatever arrives here must never be called sampling: `expected_steps == 0`
+    // means there is no step count to compare against, so the machine defers to
+    // the log markers, which `reset_phase()` has already put in `Loading`.
+    for (step, total, phase, at) in &events {
+        assert_eq!(
+            *phase,
+            Phase::Loading,
+            "load-window event step={step}/{total} at {at:.2}s was labelled {phase:?}"
+        );
+    }
+}
+
+/// C3 — the warm path is not slowed by the phase machinery.
+///
+/// The bound is a no-regression bound against item 2's recorded warm auto_fit
+/// median, not an absolute time: same test parameters, same machine, warm,
+/// `--test-threads=1`, first run of the session discarded, median of at least
+/// three.
+///
+/// **Finding, printed rather than asserted:** the first `sampling`-phase event
+/// arrives roughly two thirds of the way into a warm run. That is not machinery
+/// cost — it is the lazy weight read. Under item 2's `auto_fit` placement sd.cpp
+/// chose `--params-backend disk`, so **every** generation re-streams the ~838
+/// tensors (386 text-encoder + 452 diffusion) that this trace shows, and item 3
+/// is what finally labels that window honestly instead of rendering it as
+/// generation progress.
+#[test]
+#[ignore = "requires a downloaded Z-Image model and a GPU"]
+fn warm_generation_does_not_regress_against_the_item_2_median() {
+    use sd_wrapper::{Phase, ProgressUpdate};
+    use std::sync::{Arc, Mutex};
+
+    /// Item 2's recorded warm auto_fit median, seconds — measured on this
+    /// machine with these parameters and committed with `e445b2c`
+    /// ("feat: let sd.cpp auto_fit place model weights, replacing six perf
+    /// toggles"). The gate there was the same 1.15x form.
+    const ITEM_2_AUTO_FIT_MEDIAN_SECS: f64 = 4.1586;
+
+    let ctx = zimage_cancel_context();
+
+    const RUNS: usize = 4; // the first is discarded as cold
+    let mut totals = Vec::new();
+    let mut latencies = Vec::new();
+
+    for i in 0..RUNS {
+        let slot: Arc<Mutex<Option<f64>>> = Arc::new(Mutex::new(None));
+        let sink = Arc::clone(&slot);
+        let t0 = std::time::Instant::now();
+        let cb: sd_wrapper::progress::ProgressCallback = Box::new(move |u: ProgressUpdate| {
+            if u.phase == Phase::Sampling {
+                let mut s = sink.lock().unwrap();
+                if s.is_none() {
+                    *s = Some(t0.elapsed().as_secs_f64());
+                }
+            }
+        });
+
+        let started = std::time::Instant::now();
+        ctx.txt2img(zimage_cancel_params(4, 42), Vec::new(), Some(cb), None)
+            .unwrap_or_else(|e| panic!("run {i} failed: {e:?}"));
+        let total = started.elapsed().as_secs_f64();
+        let latency = slot
+            .lock()
+            .unwrap()
+            .unwrap_or_else(|| panic!("run {i} never reported a sampling phase"));
+
+        eprintln!(
+            "[phase] run {i}: total={total:.4}s first_sampling_at={latency:.4}s ({:.0}% of the run)",
+            latency / total * 100.0
+        );
+        if i > 0 {
+            totals.push(total);
+            latencies.push(latency);
+        }
+    }
+
+    let mut sorted = totals.clone();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let median = sorted[sorted.len() / 2];
+    let bound = 1.15 * ITEM_2_AUTO_FIT_MEDIAN_SECS;
+    let latency_median = {
+        let mut s = latencies.clone();
+        s.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        s[s.len() / 2]
+    };
+
+    eprintln!("[phase] warm totals={totals:?} median={median:.4}s bound={bound:.4}s");
+    eprintln!(
+        "[phase] FINDING: first sampling event at a median of {latency_median:.4}s, \
+         {:.0}% of the {median:.4}s run — the lazy re-read of ~838 tensors that \
+         params-backend=disk pays on every generation.",
+        latency_median / median * 100.0
+    );
+
+    assert!(
+        median <= bound,
+        "warm median {median:.4}s regressed past {bound:.4}s (1.15 x item 2's \
+         recorded {ITEM_2_AUTO_FIT_MEDIAN_SECS:.4}s)"
+    );
 }

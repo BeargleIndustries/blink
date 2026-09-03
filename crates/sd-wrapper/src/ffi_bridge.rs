@@ -122,9 +122,14 @@ impl SdCppContext {
     /// `cancel_handle` is published as soon as `new_sd_ctx` returns, so a cancel
     /// pressed during the load is replayed against the fresh context rather than
     /// dropped.
+    ///
+    /// `load_progress_cb` is installed around `new_sd_ctx` with
+    /// `expected_steps == 0`, so switching models is not a dead UI. Its events are
+    /// tensor counts; the phase machine defers to the log markers there.
     pub(crate) fn new(
         config: &ContextConfig,
         cancel_handle: &Arc<CancelHandle>,
+        load_progress_cb: Option<ProgressCallback>,
     ) -> Result<Self, SdError> {
         // Validate that at least one model path is provided
         if config.model_path.is_none() && config.diffusion_model_path.is_none() {
@@ -281,7 +286,28 @@ impl SdCppContext {
                 config.n_threads
             );
 
+            // Progress during the load itself. `expected_steps: 0` tells the
+            // phase machine there is no step count to compare against here, so
+            // it defers to the log markers — which `reset_phase()` has already
+            // put in `Loading`.
+            crate::progress::reset_phase();
+            let load_trampoline_ptr = Box::into_raw(Box::new(ProgressTrampolineData {
+                callback: load_progress_cb,
+                expected_steps: 0,
+            }));
+            sd_sys::sd_set_progress_callback(
+                Some(progress_trampoline),
+                load_trampoline_ptr as *mut c_void,
+            );
+
             let ctx = sd_sys::new_sd_ctx(&params);
+
+            // Same clear-then-reclaim ordering the generate path uses, and it
+            // runs before the null check so the error path cannot leak the box
+            // or leave sd.cpp holding a callback into it.
+            sd_sys::sd_set_progress_callback(None, std::ptr::null_mut());
+            let _ = Box::from_raw(load_trampoline_ptr);
+
             if ctx.is_null() {
                 return Err(SdError::ContextCreationFailed {
                     reason: "new_sd_ctx returned null — model may be corrupted or incompatible"
@@ -449,8 +475,15 @@ impl SdCppContext {
 
         // Set up progress trampoline — heap-allocated so it outlives any early return
         // from generate() while sd.cpp's global callback is still set.
+        // Start every generation in `Loading` with the latch clear, so a lazy
+        // weight load inside this generation is labelled honestly.
+        crate::progress::reset_phase();
+
         let trampoline_data = Box::new(ProgressTrampolineData {
             callback: progress_cb,
+            // The value Blink REQUESTED, read before sd.cpp sees it — not
+            // re-read from gen_params afterwards.
+            expected_steps: params.steps,
         });
         let trampoline_ptr = Box::into_raw(trampoline_data);
 
@@ -755,6 +788,9 @@ unsafe extern "C" fn sd_log_trampoline(
             _ => "[sd.cpp DEBUG]",
         };
         eprintln!("{} {}", prefix, trimmed);
+        // One-way phase upgrades. This is the only signal available during the
+        // `new_sd_ctx` window, where no step count exists to reason from.
+        crate::progress::note_log_line(trimmed);
     }
 }
 
@@ -764,21 +800,39 @@ unsafe extern "C" fn sd_log_trampoline(
 
 struct ProgressTrampolineData {
     callback: Option<ProgressCallback>,
+    /// The step count Blink asked for, or 0 for the `new_sd_ctx` window.
+    expected_steps: u32,
 }
 
 /// C-compatible callback forwarded from sd.cpp's global progress system.
 unsafe extern "C" fn progress_trampoline(step: c_int, steps: c_int, time: f32, data: *mut c_void) {
-    eprintln!("[blink] Progress: step={}, total_steps={}, time={:.1}s", step, steps, time);
     if data.is_null() {
+        eprintln!("[blink] Progress: step={}, total_steps={}, time={:.1}s", step, steps, time);
         return;
     }
     let cb_data = &*(data as *const ProgressTrampolineData);
+    // The heuristic runs UNCONDITIONALLY on every event — it is not gated on
+    // "no marker seen yet". Markers influence the result only by having already
+    // upgraded the stored phase through `note_log_line`.
+    let phase = crate::progress::note_progress(
+        step as u32,
+        steps as u32,
+        cb_data.expected_steps,
+    );
+    eprintln!(
+        "[blink] Progress: step={}, total_steps={}, time={:.1}s, phase={}",
+        step,
+        steps,
+        time,
+        phase.as_str()
+    );
     if let Some(ref cb) = cb_data.callback {
         cb(ProgressUpdate {
             step: step as u32,
             total_steps: steps as u32,
             elapsed_secs: time,
             preview: None,
+            phase,
         });
     }
 }
@@ -993,7 +1047,7 @@ mod tests {
         // requires the Ok type to implement Debug, and SdCppContext deliberately
         // does not (it wraps a raw sd_ctx_t pointer).
         let handle = Arc::new(CancelHandle::new());
-        match SdCppContext::new(&config, &handle) {
+        match SdCppContext::new(&config, &handle, None) {
             Err(SdError::ModelNotFound { path }) => assert!(path.contains("nonexistent")),
             Err(other) => panic!("Expected ModelNotFound, got: {:?}", other),
             Ok(_) => panic!("Expected ModelNotFound, got a context"),

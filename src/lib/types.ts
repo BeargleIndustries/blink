@@ -42,6 +42,14 @@ export interface GenerationProgress {
   step: number;
   total_steps: number;
   elapsed_secs: number;
+  phase: "loading" | "sampling" | "decoding";
+}
+
+/** Progress while a model is read off disk. Counts are engine internals — show a
+ *  bar, never the numbers. */
+export interface ModelLoadProgress {
+  step: number;
+  total_steps: number;
 }
 
 export interface ModelInfo {

@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use sd_wrapper::{SdContext, ContextConfig, UpscalerContext, LoraApplyMode, CancelHandle};
 use serde::{Deserialize, Serialize};
 
@@ -18,6 +18,15 @@ use serde::{Deserialize, Serialize};
 pub struct PerfSettings {
     #[serde(default)]
     pub low_memory: bool,
+}
+
+/// Progress while a model is being read off disk. Emitted as
+/// `model:load_progress`; the counts are tensors, which the UI must render as a
+/// percentage and never as a number.
+#[derive(Debug, Serialize, Clone)]
+pub struct ModelLoadProgressEvent {
+    pub step: u32,
+    pub total_steps: u32,
 }
 
 pub struct AppState {
@@ -85,6 +94,23 @@ impl AppState {
             taesd_path: paths.taesd_path,
             lora_apply_mode: LoraApplyMode::Auto,
         };
+        // Loading a model reads several GB off disk and used to be a completely
+        // dead UI — no event reached the frontend until the context existed.
+        // Forward sd.cpp's load progress as `model:load_progress` so switching
+        // models shows movement. The counts are tensors, which is an engine
+        // internal: the UI renders a percentage from them and never the number.
+        let load_handle = self.app_handle.clone();
+        let load_progress_cb: sd_wrapper::progress::ProgressCallback =
+            Box::new(move |update: sd_wrapper::ProgressUpdate| {
+                let _ = load_handle.emit(
+                    "model:load_progress",
+                    ModelLoadProgressEvent {
+                        step: update.step,
+                        total_steps: update.total_steps,
+                    },
+                );
+            });
+
         // Share cancel_flag and cancel_handle so cancel_generation doesn't need to
         // lock sd_context. The handle is re-pointed at the new sd.cpp context by
         // SdCppContext::new, and cleared before the old one is freed.
@@ -92,6 +118,7 @@ impl AppState {
             config,
             self.cancel_flag.clone(),
             self.cancel_handle.clone(),
+            Some(load_progress_cb),
         )?;
         let mut lock = self.sd_context.lock().map_err(|e| sd_wrapper::SdError::ContextCreationFailed {
             reason: format!("Lock poisoned: {}", e),
