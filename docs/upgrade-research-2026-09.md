@@ -203,6 +203,27 @@ Note the inconsistency this caused: an attention-only LoRA was always applied co
 LoRAs with FFN layers lost ~40% of their weights. That alone makes LoRA strength feel
 unpredictable from file to file.
 
+**How the fix ships.** The submodule stays pinned to a pristine upstream SHA; the fix lives as
+`crates/sd-sys/patches/0001-feed_forward-protected-token.patch` and is applied to the submodule
+working tree by `crates/sd-sys/build.rs` (`apply_vendored_patches`) on every build. Consequences
+to know about:
+
+- **A dirty submodule working tree is the expected, correct state.** ` m crates/sd-sys/stable-diffusion.cpp`
+  in `git status` is what "the patch is applied" looks like. The recorded gitlink SHA must not
+  change.
+- `git submodule update` refuses to discard local changes without `--force`. If it is forced, the
+  next `cargo build` re-applies the patch.
+- The apply is deliberately plain `git apply` — **not** `--3way`, which implies `--index` (it
+  would stage the change inside the submodule) and whose `--check` succeeds in both directions,
+  destroying the already-applied test. It also runs with git's configured `core.autocrlf` rather
+  than forcing it off: on a CRLF checkout, forcing it off makes every apply fail. `.gitattributes`
+  pins `*.patch` to LF, which is the part that does need forcing.
+- When upstream merges this one line, the patch stops applying and the build **fails loudly**
+  with a message saying upstream merged it and to delete the patch file. Deleting it is the whole
+  fix. `crates/sd-sys/tests/vendored_patches.rs` then still asserts the token is present.
+- `BLINK_SKIP_SD_PATCHES=1` builds against pristine upstream, with a warning. Expect dropped LoRA
+  FFN tensors.
+
 ### Bug 2: LoRA applied ~4x too strongly — STILL PRESENT, no fix available
 
 Upstream [issue #1071](https://github.com/leejet/stable-diffusion.cpp/issues/1071),

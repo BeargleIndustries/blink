@@ -1,9 +1,22 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// The vendored source file the `feed_forward` fix lives in, relative to the
+/// submodule root. Checked as a postcondition so a build can never succeed
+/// without the LoRA FFN fix present.
+const FEED_FORWARD_FILE: &str = "src/name_conversion.cpp";
+/// The exact text the fix adds to `protected_tokens`.
+const FEED_FORWARD_TOKEN: &str = "\"feed_forward\",";
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let sd_cpp_dir = manifest_dir.join("stable-diffusion.cpp");
+
+    // --- Local patches against the pristine upstream submodule ---
+    // The submodule stays pinned to an unmodified upstream SHA; our local fixes
+    // are applied to its working tree here. A permanently dirty submodule
+    // working tree is the expected state (see docs/upgrade-research-2026-09.md).
+    apply_vendored_patches(&manifest_dir, &sd_cpp_dir);
 
     // --- Auto-detect GPU backends (feature flags serve as force-overrides) ---
     let use_cuda = detect_cuda();
@@ -203,6 +216,273 @@ fn main() {
     );
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
     println!("cargo:rerun-if-env-changed=VULKAN_SDK");
+}
+
+/// Apply `crates/sd-sys/patches/*.patch` to the vendored stable-diffusion.cpp
+/// working tree, idempotently, before CMake sees the sources.
+///
+/// Why this exists: the submodule is pinned to a pristine upstream SHA so that
+/// bumping it stays a one-line change and reviewers can see exactly which
+/// upstream revision is in use. Our local fixes (currently just the
+/// `feed_forward` protected-token fix that stops LoRA FFN tensors being
+/// dropped) live as patch files next to this build script — the same artifact
+/// we send upstream. When upstream merges one, the patch stops applying and
+/// this build fails loudly with a message telling you to delete it.
+///
+/// ## Why plain `git apply`, and not `git apply --3way`
+///
+/// `--3way` is tempting for line-ending robustness but is wrong here, verified
+/// on this repo with git 2.52 and `core.autocrlf=true`:
+///
+/// * `--3way` implies `--index`, so it *stages* the change inside the
+///   submodule. The expected state is an unstaged ` M`, not a staged `M `.
+/// * `git apply --3way --check` succeeds in *both* directions (forward and
+///   `--reverse`) because the blob-level merge is trivially satisfiable, which
+///   destroys the already-applied/not-yet-applied discrimination below.
+/// * `--3way` can leave conflict markers in the working file on a partial
+///   failure; plain `git apply` is all-or-nothing.
+///
+/// Nor do we pass `-c core.autocrlf=false`: with `autocrlf=true` the working
+/// tree is CRLF while the index blob is LF, and disabling the conversion makes
+/// every apply fail (`does not match index` / `patch does not apply`). Letting
+/// git use its configured conversion is what makes an LF patch apply cleanly to
+/// a CRLF checkout. The patch files themselves are pinned to LF by the
+/// repo-root `.gitattributes` (`*.patch -text`), which is the half of the CRLF
+/// story that does need to be forced.
+fn apply_vendored_patches(manifest_dir: &Path, sd_cpp_dir: &Path) {
+    let patch_dir = manifest_dir.join("patches");
+    println!("cargo:rerun-if-changed={}", patch_dir.display());
+    println!("cargo:rerun-if-env-changed=BLINK_SKIP_SD_PATCHES");
+
+    if env::var("BLINK_SKIP_SD_PATCHES").as_deref() == Ok("1") {
+        println!(
+            "cargo:warning=BLINK_SKIP_SD_PATCHES is set — vendored sd.cpp patches are NOT \
+             applied; LoRA feed_forward tensors will be dropped"
+        );
+        return;
+    }
+
+    let mut patches: Vec<PathBuf> = std::fs::read_dir(&patch_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("patch"))
+        .collect();
+    // Sort by filename so application order is deterministic (0001-, 0002-, ...).
+    patches.sort();
+
+    if patches.is_empty() {
+        // Nothing to do. This is the steady state after upstream merges every
+        // local fix; `vendored_patches.rs` still asserts the fix is present.
+        return;
+    }
+
+    for patch in &patches {
+        let name = patch
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("<unnamed>")
+            .to_string();
+
+        // i. Already applied? A clean *reverse* apply means the change is
+        //    already in the working tree, so repeated builds are a no-op and
+        //    the source file's mtime stays stable.
+        if git_apply(sd_cpp_dir, &["--check", "--reverse"], patch).0 {
+            println!("cargo:warning=sd.cpp patch already applied: {name}");
+            continue;
+        }
+
+        // ii. Applicable? If not, work out *why* before panicking: an upstream
+        //     merge and a broken patch need opposite responses, and confusing
+        //     them is how the fix gets deleted by mistake.
+        let (ok, stderr) = git_apply(sd_cpp_dir, &["--check"], patch);
+        if !ok {
+            if patch_additions_already_present(sd_cpp_dir, patch) {
+                panic!(
+                    "Patch `{name}` no longer applies, and its changes are already present in \
+                     the vendored stable-diffusion.cpp sources. Upstream has merged it — delete \
+                     `crates/sd-sys/patches/{name}`."
+                );
+            }
+            panic!(
+                "Patch `{name}` failed to apply to submodule {sha} and the fix is NOT present. \
+                 This is a patch failure, not an upstream merge. Do not delete the patch. \
+                 git stderr: {stderr}\nCheck line endings (`core.autocrlf` may be true on this \
+                 host; `*.patch` must stay LF) and rebase the patch onto the new submodule \
+                 revision.",
+                sha = submodule_short_sha(sd_cpp_dir),
+            );
+        }
+
+        // iii. Apply. On failure restore the touched files first — never leave
+        //      a half-patched vendored tree behind for the next build to
+        //      misread.
+        let (ok, stderr) = git_apply(sd_cpp_dir, &[], patch);
+        if !ok {
+            let restore_note = restore_patch_targets(sd_cpp_dir, patch);
+            panic!(
+                "Patch `{name}` passed --check but failed to apply to submodule {sha}. \
+                 git stderr: {stderr}{restore_note}",
+                sha = submodule_short_sha(sd_cpp_dir),
+            );
+        }
+        println!("cargo:warning=applied sd.cpp patch: {name}");
+    }
+
+    // Postcondition, independent of git's exit codes: a patch that applied to
+    // the wrong hunk, or a refactor that moved the protected-token list, must
+    // not produce a silently broken build.
+    let target = sd_cpp_dir.join(FEED_FORWARD_FILE);
+    let source = std::fs::read_to_string(&target)
+        .unwrap_or_else(|e| panic!("failed to read {} after patching: {e}", target.display()));
+
+    if !source.contains(FEED_FORWARD_TOKEN) {
+        panic!(
+            "vendored sd.cpp patches reported success but {FEED_FORWARD_FILE} does not contain \
+             {FEED_FORWARD_TOKEN} — the LoRA FFN fix is not in this build"
+        );
+    }
+    if source.contains("<<<<<<<") || source.contains(">>>>>>>") {
+        panic!(
+            "{FEED_FORWARD_FILE} contains merge conflict markers; the vendored tree is corrupt. \
+             Run: git -C crates/sd-sys/stable-diffusion.cpp checkout -- {FEED_FORWARD_FILE} \
+             and rebuild"
+        );
+    }
+}
+
+/// Run `git -C <sd_cpp_dir> apply <extra args> <patch>`. Returns
+/// (success, stderr). Panics only if git itself cannot be spawned — a missing
+/// git must never degrade into a silent skip.
+fn git_apply(sd_cpp_dir: &Path, extra: &[&str], patch: &Path) -> (bool, String) {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(sd_cpp_dir)
+        .arg("apply")
+        .args(extra)
+        .arg(patch)
+        .output()
+        .unwrap_or_else(|e| {
+            panic!(
+                "git is required to apply vendored sd.cpp patches (it is already required for \
+                 the submodule checkout): {e}"
+            )
+        });
+
+    (
+        output.status.success(),
+        String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    )
+}
+
+/// Files a unified diff touches, taken from its `+++ b/<path>` headers.
+fn patch_targets(patch: &Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(patch) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|l| l.strip_prefix("+++ b/"))
+        .map(|p| p.trim().to_string())
+        .collect()
+}
+
+/// True when every line the patch *adds* is already present in the submodule's
+/// **committed** (`HEAD`) sources — i.e. upstream has merged our fix.
+///
+/// This deliberately reads `HEAD:<path>` rather than the working tree. The
+/// working tree normally already contains the addition because *we* put it
+/// there on a previous build, so a working-tree grep answers "yes, upstream
+/// merged it" for a merely-broken patch and invites someone to delete a patch
+/// that is still the only source of the fix (the exact way the fix gets lost).
+/// `HEAD` contains the addition only if it really came from upstream.
+fn patch_additions_already_present(sd_cpp_dir: &Path, patch: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(patch) else {
+        return false;
+    };
+
+    let mut current: Option<String> = None;
+    let mut checked_any = false;
+
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("+++ b/") {
+            current = committed_source(sd_cpp_dir, path.trim());
+            continue;
+        }
+        if line.starts_with("+++") || !line.starts_with('+') {
+            continue;
+        }
+        let added = &line[1..];
+        if added.trim().is_empty() {
+            continue;
+        }
+        checked_any = true;
+        match current.as_deref() {
+            Some(source) if source.contains(added.trim()) => {}
+            _ => return false,
+        }
+    }
+
+    checked_any
+}
+
+/// Contents of `<path>` as committed at the submodule's `HEAD`, i.e. pristine
+/// upstream without any of our local patches.
+fn committed_source(sd_cpp_dir: &Path, path: &str) -> Option<String> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(sd_cpp_dir)
+        .arg("show")
+        .arg(format!("HEAD:{path}"))
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// Discard any partial write left by a failed apply. Returns a note to append
+/// to the panic message — a vendored tree we could not restore must be
+/// reported, never left silently in place.
+fn restore_patch_targets(sd_cpp_dir: &Path, patch: &Path) -> String {
+    let mut failures = Vec::new();
+    for target in patch_targets(patch) {
+        let restored = std::process::Command::new("git")
+            .arg("-C")
+            .arg(sd_cpp_dir)
+            .args(["checkout", "--"])
+            .arg(&target)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !restored {
+            failures.push(target);
+        }
+    }
+    if failures.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\nWARNING: could not restore {} — the vendored tree may be corrupt. Run: \
+             git -C crates/sd-sys/stable-diffusion.cpp checkout -- {}",
+            failures.join(", "),
+            failures.join(" "),
+        )
+    }
+}
+
+/// Short SHA of the vendored submodule, for patch-failure messages.
+fn submodule_short_sha(sd_cpp_dir: &Path) -> String {
+    std::process::Command::new("git")
+        .arg("-C")
+        .arg(sd_cpp_dir)
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "<unknown>".into())
 }
 
 /// Returns Some(reason) if CUDA should be enabled, None otherwise.

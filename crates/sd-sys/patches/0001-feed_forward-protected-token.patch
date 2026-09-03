@@ -1,0 +1,12 @@
+diff --git a/src/name_conversion.cpp b/src/name_conversion.cpp
+index 7e528c77c09daa3b3615fe153fd7b70c6ba9a858..18ae73fee0fb5c5d23e8af7db1779cda7d5c38ea 100644
+--- a/src/name_conversion.cpp
++++ b/src/name_conversion.cpp
+@@ -1201,6 +1201,7 @@ std::string convert_sep_to_dot(std::string name) {
+         "cross_attn",
+         "output_proj",
+         "token_refiner",
++        "feed_forward",
+     };
+ 
+     // record the positions of underscores that should NOT be replaced
