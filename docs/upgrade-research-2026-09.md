@@ -174,6 +174,37 @@ than one GPU before being treated as a win.
 
 *Caveat: n=3 per config, one machine, one model, one resolution.*
 
+### 4b addendum (post-execution, 2026-09-03): what `auto_fit` actually chose, and what it costs
+
+The "first release" execution replaced the architecture-name offload rule with sd.cpp's
+`auto_fit` (commit `e445b2c`). Measured before the default flipped, same methodology as above,
+same machine and model:
+
+| placement | warm median (3 runs, alternating, first run discarded) |
+|---|---|
+| `low_memory` (the old `params_backend=cpu` path) | 5.2401 s |
+| `auto_fit` | **4.1586 s** (+21 %) |
+
+sd.cpp did **not** pick GPU-resident (the 2.4x-slower path above) or CPU. It elected
+`--params-backend "diffusion=disk,te=disk,vae=disk"` in every run — a third option this
+section had not modelled. Output was byte-identical across all seven runs
+(`cb2162f52e872c5b`).
+
+**What disk placement costs, measured after item 3 landed (`adcea9a`):** under
+`eager_load = false`, every generation re-streams the model's weights — on the Z-Image Turbo
+stack that is ~838 tensors (386 text-encoder + 452 diffusion). The first `sampling` progress
+event arrives at a median **2.13 s of a 3.24 s warm run (≈66 %)**. Before item 3 this window
+rendered as fake generation progress ("Step 386 / 386"); it is now labelled `loading`. So the
+placement is faster than CPU offload overall, but two-thirds of each warm generation is weight
+streaming, not sampling. **Cold `new_sd_ctx` duration under disk placement is unmeasured** — an
+open item; the 154 s figure above was measured under the old CPU-offload path.
+
+Also corrected during execution: the item 3 hazard analysis assumed a rare collision between a
+lazily-loaded component's tensor count and the step count. The real collision is
+deterministic — `sample()` emits an opening `pretty_progress(0, steps, 0)` tick
+(`stable-diffusion.cpp:2643`) *before* the lazy load, on every model and step count. The phase
+rule now reads the step index (`step == 0` ⇒ loading). See `docs/traces/`.
+
 ## 4c. LoRA on Z-Image: two separate bugs, one fixable
 
 Investigated on branch `feat/sdcpp-bump-2026-09` with `crates/sd-wrapper/tests/smoke_generation.rs`
