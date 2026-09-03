@@ -186,6 +186,16 @@ fn placement_from_env() -> Placement {
     }
 }
 
+/// Read `BLINK_TEST_MAX_VRAM`, the per-device GiB budget handed to sd.cpp
+/// (e.g. `cuda0=8`). Unset means no cap — sd.cpp uses the card's real free
+/// memory. This is what lets a 12 GB card be tested as if it were smaller.
+fn max_vram_from_env() -> Option<String> {
+    match std::env::var("BLINK_TEST_MAX_VRAM") {
+        Ok(s) if !s.trim().is_empty() => Some(s),
+        _ => None,
+    }
+}
+
 /// Generate a real image through the migrated FFI path.
 ///
 /// Z-Image is deliberately chosen: it is the stack Blink used to force onto the CPU
@@ -225,14 +235,18 @@ fn zimage_txt2img_produces_a_real_image() {
         n_threads: 4,
         auto_fit: placement.auto_fit,
         low_memory: placement.low_memory,
+        max_vram: max_vram_from_env(),
         control_net_path: None,
         taesd_path: None,
         lora_apply_mode: LoraApplyMode::Auto,
     };
 
     eprintln!(
-        "[smoke] placement={} (auto_fit={}, low_memory={})",
-        placement.label, config.auto_fit, config.low_memory
+        "[smoke] placement={} (auto_fit={}, low_memory={}, max_vram={})",
+        placement.label,
+        config.auto_fit,
+        config.low_memory,
+        config.max_vram.as_deref().unwrap_or("<unset>")
     );
 
     let started = std::time::Instant::now();
@@ -323,6 +337,7 @@ fn different_seeds_produce_different_images() {
         n_threads: 4,
         auto_fit: true,
         low_memory: false,
+        max_vram: None,
         control_net_path: None,
         taesd_path: None,
         lora_apply_mode: LoraApplyMode::Auto,
@@ -445,6 +460,7 @@ fn lora_strength_probe() {
         n_threads: 4,
         auto_fit: true,
         low_memory: false,
+        max_vram: None,
         control_net_path: None,
         taesd_path: None,
         // BLINK_TEST_LORA_MODE=immediate|runtime|auto (default auto)
@@ -552,6 +568,7 @@ fn zimage_config() -> sd_wrapper::ContextConfig {
         n_threads: 4,
         auto_fit: true,
         low_memory: false,
+        max_vram: None,
         control_net_path: None,
         taesd_path: None,
         lora_apply_mode: LoraApplyMode::Auto,

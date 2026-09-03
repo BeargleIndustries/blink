@@ -217,6 +217,15 @@ impl SdCppContext {
                 reason: "taesd_path contains interior NUL byte".into(),
             })?;
 
+        // Built out here with the paths so it outlives new_sd_ctx(), which only
+        // borrows the pointer.
+        let max_vram_c = config.max_vram.as_ref()
+            .map(|s| CString::new(s.as_str()))
+            .transpose()
+            .map_err(|_| SdError::InvalidParams {
+                reason: "max_vram contains interior NUL byte".into(),
+            })?;
+
         unsafe {
             // Install sd.cpp log callback so we can see CUDA init, backend selection, etc.
             sd_sys::sd_set_log_callback(Some(sd_log_trampoline), std::ptr::null_mut());
@@ -283,6 +292,13 @@ impl SdCppContext {
             } else if config.uses_auto_fit() {
                 params.auto_fit = true;
                 log::info!("Parameter placement: auto_fit (sd.cpp decides from measured VRAM)");
+            }
+
+            // Caps the VRAM auto_fit is allowed to plan with, so a large card can
+            // be made to derive a small card's placement.
+            if let Some(ref mv) = max_vram_c {
+                params.max_vram = mv.as_ptr();
+                log::info!("VRAM budget: max_vram={}", mv.to_string_lossy());
             }
 
             let model_display = config.model_path.as_deref()
@@ -1107,6 +1123,7 @@ mod tests {
             n_threads: 4,
             auto_fit: true,
             low_memory: false,
+            max_vram: None,
             control_net_path: None,
             taesd_path: None,
             lora_apply_mode: LoraApplyMode::Auto,

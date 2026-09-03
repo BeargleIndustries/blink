@@ -90,6 +90,7 @@ impl AppState {
             n_threads: num_cpus(),
             auto_fit: !perf.low_memory,
             low_memory: perf.low_memory,
+            max_vram: None,
             control_net_path: paths.control_net_path,
             taesd_path: paths.taesd_path,
             lora_apply_mode: LoraApplyMode::Auto,

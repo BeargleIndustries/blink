@@ -32,6 +32,13 @@ pub struct ContextConfig {
     /// Escape hatch: force every parameter to CPU RAM (Blink's pre-auto_fit
     /// behaviour). Overrides auto_fit.
     pub low_memory: bool,
+    /// Per-device VRAM budget in GiB, passed straight to sd.cpp's `max_vram`
+    /// (e.g. `"cuda0=8"`). Only meaningful alongside `auto_fit`: a positive
+    /// value caps what auto-fit is allowed to plan with on that device, which
+    /// is how a 12 GB card can be made to derive the placement a smaller card
+    /// would get. `None` leaves sd.cpp on its default (free memory minus a
+    /// 512 MiB margin).
+    pub max_vram: Option<String>,
     // ControlNet model path
     pub control_net_path: Option<String>,
     // TAESD model path for live previews
@@ -63,6 +70,7 @@ impl Default for ContextConfig {
             n_threads: 4,
             auto_fit: true,
             low_memory: false,
+            max_vram: None,
             control_net_path: None,
             taesd_path: None,
             lora_apply_mode: LoraApplyMode::Auto,
