@@ -159,10 +159,106 @@ fn save_metadata(model_dir: &str, metadata: &ModelMetadata) -> Result<(), String
     std::fs::write(path, data).map_err(|e| e.to_string())
 }
 
+/// Bring cached download status back in line with what is actually on disk.
+/// Never deletes a file or a metadata entry; only rewrites status strings.
+/// Returns true if anything changed.
+fn reconcile_metadata(model_dir: &str, metadata: &mut ModelMetadata) -> bool {
+    let mut changed = false;
+
+    for status in metadata.models.values_mut() {
+        match status.status.as_str() {
+            "ready" => {
+                if let Some(ref mut files) = status.files {
+                    // Multi-file model: demote any individual file that has vanished.
+                    let mut any_missing = false;
+                    for fs in files.values_mut() {
+                        if fs.status == "ready" {
+                            let full_path = Path::new(model_dir).join(&fs.path);
+                            if !full_path.exists() {
+                                fs.status = "missing".to_string();
+                                any_missing = true;
+                            }
+                        }
+                    }
+                    if any_missing {
+                        status.status = "missing".to_string();
+                        changed = true;
+                    }
+                } else {
+                    // Single-file model.
+                    let full_path = Path::new(model_dir).join(&status.path);
+                    if !full_path.exists() {
+                        status.status = "missing".to_string();
+                        changed = true;
+                    }
+                }
+            }
+            "missing" => {
+                if let Some(ref mut files) = status.files {
+                    // Multi-file model: promote back to ready only if every file has
+                    // reappeared (e.g. a removable/network drive was remounted).
+                    let all_present = !files.is_empty()
+                        && files.values().all(|fs| Path::new(model_dir).join(&fs.path).exists());
+                    if all_present {
+                        for fs in files.values_mut() {
+                            fs.status = "ready".to_string();
+                        }
+                        status.status = "ready".to_string();
+                        changed = true;
+                    }
+                } else {
+                    let full_path = Path::new(model_dir).join(&status.path);
+                    if full_path.exists() {
+                        status.status = "ready".to_string();
+                        changed = true;
+                    }
+                }
+            }
+            _ => {
+                // "partial", "failed", or anything else: leave untouched. Those
+                // transitions belong to the download path, not reconciliation.
+            }
+        }
+    }
+
+    changed
+}
+
+/// Load metadata, reconcile it against what's actually on disk, and persist the
+/// result only if something changed. Call on startup and before every model-list
+/// read. Never call from the download path — it mutates metadata mid-flight and
+/// reconciling concurrently could mark a file that is still being written as missing.
+pub(crate) fn reconcile_metadata_on_disk(model_dir: &str) {
+    let mut metadata = load_metadata(model_dir);
+    let before: HashMap<String, String> = metadata.models.iter()
+        .map(|(id, s)| (id.clone(), s.status.clone()))
+        .collect();
+
+    if !reconcile_metadata(model_dir, &mut metadata) {
+        return;
+    }
+
+    for (id, status) in &metadata.models {
+        if before.get(id).map(String::as_str) != Some(status.status.as_str()) {
+            log::info!(
+                "Reconciled model '{}' metadata: {} -> {}",
+                id,
+                before.get(id).map(String::as_str).unwrap_or("?"),
+                status.status
+            );
+        }
+    }
+
+    if let Err(e) = save_metadata(model_dir, &metadata) {
+        log::error!("Failed to save reconciled metadata: {}", e);
+    }
+}
+
 #[tauri::command]
 pub async fn get_models(state: State<'_, AppState>) -> Result<Vec<ModelInfo>, String> {
     let manifest = load_manifest()?;
     let model_dir = state.model_dir.lock().map_err(|e| e.to_string())?.clone();
+    reconcile_metadata_on_disk(&model_dir);
     let metadata = load_metadata(&model_dir);
     let active = state.active_model.lock().map_err(|e| e.to_string())?.clone();
 
@@ -1088,4 +1184,236 @@ fn unix_timestamp() -> String {
         .unwrap_or_default()
         .as_secs();
     format!("{}", secs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// Minimal manual temp-dir helper — avoids adding a `tempfile` dev-dependency
+    /// for a single test module. Creates a unique directory under the OS temp dir
+    /// and removes it on drop.
+    struct TempTestDir {
+        path: PathBuf,
+    }
+
+    impl TempTestDir {
+        fn new(label: &str) -> Self {
+            static COUNTER: AtomicU64 = AtomicU64::new(0);
+            let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let pid = std::process::id();
+            let path = std::env::temp_dir()
+                .join(format!("blink-reconcile-test-{}-{}-{}", label, pid, n));
+            std::fs::create_dir_all(&path).expect("create temp test dir");
+            Self { path }
+        }
+
+        fn path_str(&self) -> String {
+            self.path.to_string_lossy().into_owned()
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn single_file_status(status: &str, rel_path: &str) -> ModelStatus {
+        ModelStatus {
+            status: status.to_string(),
+            path: rel_path.to_string(),
+            downloaded_at: Some("1234567890".to_string()),
+            size_bytes: 42,
+            sha256_verified: false,
+            files: None,
+            architecture: None,
+            name: None,
+        }
+    }
+
+    /// `files`: (role, file_status, relative_path).
+    fn multi_file_status(status: &str, dir_path: &str, files: &[(&str, &str, &str)]) -> ModelStatus {
+        let mut map = HashMap::new();
+        for (role, fstatus, fpath) in files {
+            map.insert((*role).to_string(), FileStatus {
+                status: (*fstatus).to_string(),
+                path: (*fpath).to_string(),
+            });
+        }
+        ModelStatus {
+            status: status.to_string(),
+            path: dir_path.to_string(),
+            downloaded_at: Some("1234567890".to_string()),
+            size_bytes: 100,
+            sha256_verified: false,
+            files: Some(map),
+            architecture: None,
+            name: None,
+        }
+    }
+
+    fn write_file(dir: &Path, rel: &str, contents: &[u8]) {
+        let full = dir.join(rel);
+        if let Some(parent) = full.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(full, contents).unwrap();
+    }
+
+    fn empty_metadata() -> ModelMetadata {
+        ModelMetadata { models: HashMap::new(), active_model: None }
+    }
+
+    #[test]
+    fn reconcile_marks_missing_single_file_model_as_missing() {
+        let dir = TempTestDir::new("single-missing");
+        let mut meta = empty_metadata();
+        meta.models.insert("sd1".to_string(), single_file_status("ready", "sd1/model.gguf"));
+        // File intentionally not created on disk.
+
+        let changed = reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert!(changed);
+        assert_eq!(meta.models["sd1"].status, "missing");
+    }
+
+    #[test]
+    fn reconcile_marks_multi_file_model_missing_when_one_file_is_gone() {
+        let dir = TempTestDir::new("multi-missing");
+        write_file(&dir.path, "flux/diffusion_model.gguf", b"a");
+        // clip_l intentionally absent.
+
+        let mut meta = empty_metadata();
+        meta.models.insert("flux-schnell-q4".to_string(), multi_file_status(
+            "ready",
+            "flux/",
+            &[
+                ("diffusion_model", "ready", "flux/diffusion_model.gguf"),
+                ("clip_l", "ready", "flux/clip_l.safetensors"),
+            ],
+        ));
+
+        let changed = reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert!(changed);
+        assert_eq!(meta.models["flux-schnell-q4"].status, "missing");
+    }
+
+    #[test]
+    fn reconcile_downgrades_the_individual_missing_file_status() {
+        let dir = TempTestDir::new("file-downgrade");
+        write_file(&dir.path, "flux/diffusion_model.gguf", b"a");
+
+        let mut meta = empty_metadata();
+        meta.models.insert("flux-schnell-q4".to_string(), multi_file_status(
+            "ready",
+            "flux/",
+            &[
+                ("diffusion_model", "ready", "flux/diffusion_model.gguf"),
+                ("clip_l", "ready", "flux/clip_l.safetensors"),
+            ],
+        ));
+
+        reconcile_metadata(&dir.path_str(), &mut meta);
+
+        let files = meta.models["flux-schnell-q4"].files.as_ref().unwrap();
+        assert_eq!(files["diffusion_model"].status, "ready");
+        assert_eq!(files["clip_l"].status, "missing");
+    }
+
+    #[test]
+    fn reconcile_restores_a_model_whose_files_reappear() {
+        let dir = TempTestDir::new("promote");
+        let mut meta = empty_metadata();
+        meta.models.insert("flux-schnell-q4".to_string(), multi_file_status(
+            "missing",
+            "flux/",
+            &[
+                ("diffusion_model", "missing", "flux/diffusion_model.gguf"),
+                ("clip_l", "missing", "flux/clip_l.safetensors"),
+            ],
+        ));
+
+        // Files reappear — e.g. a removable/network drive was remounted.
+        write_file(&dir.path, "flux/diffusion_model.gguf", b"a");
+        write_file(&dir.path, "flux/clip_l.safetensors", b"b");
+
+        let changed = reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert!(changed);
+        let status = &meta.models["flux-schnell-q4"];
+        assert_eq!(status.status, "ready");
+        let files = status.files.as_ref().unwrap();
+        assert_eq!(files["diffusion_model"].status, "ready");
+        assert_eq!(files["clip_l"].status, "ready");
+    }
+
+    #[test]
+    fn reconcile_leaves_present_models_untouched() {
+        let dir = TempTestDir::new("untouched");
+        write_file(&dir.path, "sd1/model.gguf", b"a");
+
+        let mut meta = empty_metadata();
+        meta.models.insert("sd1".to_string(), single_file_status("ready", "sd1/model.gguf"));
+
+        let changed = reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert!(!changed);
+        assert_eq!(meta.models["sd1"].status, "ready");
+    }
+
+    #[test]
+    fn reconcile_does_not_delete_or_drop_entries() {
+        let dir = TempTestDir::new("no-delete");
+        let mut meta = empty_metadata();
+        meta.models.insert("sd1".to_string(), single_file_status("ready", "sd1/model.gguf"));
+        meta.models.insert("flux-schnell-q4".to_string(), multi_file_status(
+            "ready", "flux/",
+            &[("diffusion_model", "ready", "flux/diffusion_model.gguf")],
+        ));
+        // Neither model's files exist on disk.
+
+        let before_count = meta.models.len();
+        let before_path_sd1 = meta.models["sd1"].path.clone();
+        let before_size_sd1 = meta.models["sd1"].size_bytes;
+
+        reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert_eq!(meta.models.len(), before_count);
+        assert_eq!(meta.models["sd1"].path, before_path_sd1);
+        assert_eq!(meta.models["sd1"].size_bytes, before_size_sd1);
+        assert!(meta.models.contains_key("flux-schnell-q4"));
+    }
+
+    #[test]
+    fn reconcile_is_idempotent() {
+        let dir = TempTestDir::new("idempotent");
+        let mut meta = empty_metadata();
+        meta.models.insert("sd1".to_string(), single_file_status("ready", "sd1/model.gguf"));
+        // File absent — first pass demotes it.
+
+        let first = reconcile_metadata(&dir.path_str(), &mut meta);
+        assert!(first);
+        let second = reconcile_metadata(&dir.path_str(), &mut meta);
+        assert!(!second);
+    }
+
+    #[test]
+    fn reconcile_ignores_entries_that_are_not_ready() {
+        let dir = TempTestDir::new("ignore-partial");
+        let mut meta = empty_metadata();
+        meta.models.insert("flux-schnell-q4".to_string(), multi_file_status(
+            "partial", "flux/",
+            &[("diffusion_model", "ready", "flux/diffusion_model.gguf")],
+        ));
+        // File absent from disk, but the model status is "partial" — must be
+        // left alone; that transition belongs to the download path.
+
+        let changed = reconcile_metadata(&dir.path_str(), &mut meta);
+
+        assert!(!changed);
+        assert_eq!(meta.models["flux-schnell-q4"].status, "partial");
+    }
 }
