@@ -145,9 +145,12 @@ pub async fn generate_image(
     // Set up preview callback that emits Tauri events with JPEG-encoded preview frames
     let preview_handle = app_handle.clone();
     let preview_cb: Option<PreviewCallback> = Some(Box::new(move |_step: i32, image_data: Vec<u8>, width: u32, height: u32| {
-        use image::{ImageBuffer, RgbaImage};
+        use image::{DynamicImage, ImageBuffer};
         if let Some(img) = ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, image_data) {
-            let img: RgbaImage = img;
+            // The JPEG encoder only accepts L8/Rgb8; encoding the RGBA buffer
+            // directly returned Unsupported and every preview was dropped
+            // silently (no frame ever reached the UI until 2026-09-03).
+            let img = DynamicImage::ImageRgba8(img).to_rgb8();
             let mut jpeg_buf = Vec::new();
             let mut cursor = std::io::Cursor::new(&mut jpeg_buf);
             if img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {

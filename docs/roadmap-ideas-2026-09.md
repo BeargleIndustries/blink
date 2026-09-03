@@ -242,3 +242,30 @@ Simplicity is subtractive too.
 - More than one prompt box.
 
 Sources: [Draw Things 2026](https://jonbrown.org/blog/running-image-generation-locally-on-macos-with-draw-things-2026/), [Draw Things review](https://www.tooljunction.io/ai-tools/draw-things), [easiest local generator 2026](https://locallyuncensored.com/blog/easiest-local-ai-image-generator.html), [local generators beginner guide](https://easygoingnerd.com/blog/local-ai-image-generators-beginner/), [Z-Image vs Krea 2](https://zimage.run/blog/zi-181-z-image-vs-krea-2-en-20260805), [Krea 2 vs Z-Image tested](https://www.skool.com/myaiforce-5872/krea-2-vs-z-image-anatomy-details-styles-realism-tested), [Krea 2 local guide + licence](https://localaimaster.com/blog/krea-2-local-guide), [Anima on 6 GB](https://vantagewithai.com/anima-preview-2-powerful-anime-ai-model-that-runs-on-just-6gb-vram/), [Anima review](https://diffusiondoodles.substack.com/p/anima-light-fast-and-slightly-unruly), [Chroma local guide](https://localaimaster.com/blog/chroma-local-guide), [best local models 2026](https://localaimaster.com/blog/best-local-image-models-compared), [open-source model families 2026](https://magichour.ai/blog/open-source-image-generation-models).
+
+## In-app verification, 2026-09-03
+
+Driven through the real Tauri window (WebView2 remote debugging on :9222, not the
+Vite page), Z-Image Turbo Q8 on the 12 GB RTX 4070 SUPER. What the library tests
+had not caught:
+
+- **Cancel button was inert.** `PromptBar` bound `onClick={generating ? onCancel :
+  handleGenerate}`; Solid evaluates that once at render, so the button always called
+  the generate handler. The native cancel itself worked (a direct `cancel_generation`
+  invoke stopped sd.cpp in ~3.6 s). Fixed; the button now stops a 20-step run inside
+  the current step and the UI is idle 0.1 s after the click.
+- **Previews stalled sampling 13 s each.** Blink asked sd.cpp for `PREVIEW_TAE`, but the
+  only TAESD on disk is the SDXL one, so for Z-Image sd.cpp fell back to the full VAE.
+  Under sampling-time VRAM pressure that decode took 13 s every third step: a 20-step
+  image took 134 s instead of 14 s, and cancel could not land until the decode finished.
+  Now `PREVIEW_PROJ` (latent projection, effectively free) unless a TAESD is loaded.
+- **Previews never reached the UI at all.** The preview closure JPEG-encoded an RGBA
+  buffer; `image` 0.25's JPEG encoder only accepts L8/Rgb8, so every frame failed
+  silently. Converted to RGB; frames now arrive (64x128 for a 512x1024 projection).
+- **`placement:` line never printed.** It used `log::info!` and the app installs no
+  logger. Now `eprintln!` like the other `[blink]` lines: observed
+  `placement: auto_fit (10361 MiB usable >= 8320 MiB needed)`.
+
+Checked and passing as shipped: the Settings drawer has one placement control
+("Low-memory mode") and none of the six old toggles; the progress UI shows "Loading"
+before step 1 and never the word "tensor"; a 20-step generation is 14.4 s end to end.

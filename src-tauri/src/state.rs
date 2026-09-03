@@ -91,8 +91,10 @@ impl AppState {
         let primary_mb = primary_model_mb(&paths);
         let (_, _, free_mb) = crate::commands::system::detect_gpu_info();
         let (low_memory, reason) = low_memory_for(perf.low_memory, free_mb, primary_mb);
-        log::info!(
-            "placement: {} ({})",
+        // eprintln, not log::info: the app installs no logger, so log macros are
+        // silently dropped and this line would never reach the console.
+        eprintln!(
+            "[blink] placement: {} ({})",
             if low_memory { "low_memory" } else { "auto_fit" },
             reason
         );

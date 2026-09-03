@@ -117,7 +117,9 @@ const PromptBar: Component<PromptBarProps> = (props) => {
         }}
       />
       <button
-        onClick={props.generating ? props.onCancel : handleGenerate}
+        // Decide at click time. Solid evaluates `onClick={cond ? a : b}` once at
+        // render, so the old form bound handleGenerate forever and Cancel was inert.
+        onClick={() => (props.generating ? props.onCancel() : handleGenerate())}
         disabled={!props.generating && !canGenerate()}
         style={{
           padding: "12px 24px",

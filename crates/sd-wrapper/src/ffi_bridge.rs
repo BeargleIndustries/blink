@@ -112,6 +112,12 @@ impl Default for CancelHandle {
 pub(crate) struct SdCppContext {
     ctx: *mut sd_sys::sd_ctx_t,
     cancel_handle: Arc<CancelHandle>,
+    /// Whether a TAESD was loaded. Decides the preview mode: without one,
+    /// sd.cpp's PREVIEW_TAE silently falls back to the full VAE, and on
+    /// Z-Image that decode ran 13 s per preview mid-sampling (measured in the
+    /// app, 2026-09-03) — a 20-step image took 134 s instead of ~20 s and the
+    /// native cancel could not land until the decode finished.
+    has_taesd: bool,
 }
 
 // sd_ctx_t is internally synchronized by sd.cpp (single-threaded use from our
@@ -346,6 +352,7 @@ impl SdCppContext {
             Ok(Self {
                 ctx,
                 cancel_handle: Arc::clone(cancel_handle),
+                has_taesd: config.taesd_path.is_some(),
             })
         }
     }
@@ -562,9 +569,18 @@ impl SdCppContext {
 
             // Install preview callback if requested
             if !preview_trampoline_ptr.is_null() {
+                // TAE only when a TAESD is actually loaded; otherwise the cheap
+                // latent-to-RGB projection (see `has_taesd`). PREVIEW_PROJ covers
+                // SD1/2/XL, SD3, Flux-VAE models (incl. Z-Image) and Wan; for
+                // anything else sd.cpp logs a warning and skips the preview.
+                let preview_mode = if self.has_taesd {
+                    sd_sys::preview_t_PREVIEW_TAE
+                } else {
+                    sd_sys::preview_t_PREVIEW_PROJ
+                };
                 sd_sys::sd_set_preview_callback(
                     Some(preview_trampoline),
-                    sd_sys::preview_t_PREVIEW_TAE, // TAE preview mode
+                    preview_mode,
                     3,     // interval: every 3 steps
                     true,  // denoised
                     false, // noisy
