@@ -111,9 +111,8 @@ pub async fn generate_video(
             let height = frames[0].height;
 
             let gif_data = encode_frames_to_gif(frames)
-                .map_err(|e| {
+                .inspect_err(|e| {
                     let _ = app_handle.emit("video:error", VideoErrorEvent { message: e.clone() });
-                    e
                 })?;
 
             let gif_base64 = base64::engine::general_purpose::STANDARD.encode(&gif_data);

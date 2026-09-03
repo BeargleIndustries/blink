@@ -20,9 +20,6 @@ interface SettingsDrawerProps {
   // Image conditioning (Kontext edit mode)
   imgCfg: number; onImgCfgChange: (v: number) => void;
   showImgCfg: boolean;
-  // ControlNet
-  controlNetEnabled: boolean; onControlNetChange: (v: boolean) => void;
-  controlStrength: number; onControlStrengthChange: (v: number) => void;
   // LoRA
   loras: LoraConfig[]; onLorasChange: (v: LoraConfig[]) => void;
   // Performance
@@ -378,58 +375,6 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
             onLorasChange={props.onLorasChange}
             visible={true}
           />
-        </div>
-
-        {/* ControlNet */}
-        <div style={sectionStyle}>
-          <div style={{
-            display: "flex",
-            "align-items": "center",
-            gap: "8px",
-            "margin-bottom": "10px",
-          }}>
-            <div style={sectionHeadStyle}>ControlNet</div>
-            <Show when={props.controlNetEnabled}>
-              <span style={{
-                "font-size": "10px",
-                color: "var(--warning)",
-                background: "rgba(245, 158, 11, 0.1)",
-                border: "1px solid rgba(245, 158, 11, 0.2)",
-                "border-radius": "4px",
-                padding: "1px 6px",
-                "margin-bottom": "10px",
-              }}>
-                Requires model reload
-              </span>
-            </Show>
-          </div>
-          <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-            <ToggleOption
-              label="Preserve Structure (Canny)"
-              tooltip="Use ControlNet to preserve structural edges from the input image. Requires model reload when toggled."
-              checked={props.controlNetEnabled}
-              onChange={props.onControlNetChange}
-            />
-            <Show when={props.controlNetEnabled}>
-              <div style={{ display: "flex", "align-items": "center", gap: "8px", "padding-left": "22px" }}>
-                <span style={{ "font-size": "12px", color: "var(--text-secondary)", "min-width": "90px" }}>
-                  Control Strength
-                </span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={props.controlStrength}
-                  onInput={(e) => props.onControlStrengthChange(parseFloat(e.currentTarget.value))}
-                  style={{ flex: "1" }}
-                />
-                <span style={{ "font-size": "12px", "min-width": "35px" }}>
-                  {props.controlStrength.toFixed(2)}
-                </span>
-              </div>
-            </Show>
-          </div>
         </div>
 
         {/* Performance */}

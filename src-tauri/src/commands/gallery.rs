@@ -125,22 +125,43 @@ pub async fn delete_gallery_item(
     Ok(())
 }
 
+/// Generation settings recorded alongside a saved image. Sent from the
+/// frontend as the `meta` argument of `save_to_gallery`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveToGalleryMeta {
+    pub prompt: String,
+    pub negative_prompt: String,
+    pub model_id: String,
+    pub model_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub steps: u32,
+    pub cfg_scale: f32,
+    pub seed: i64,
+    pub sampler: String,
+    pub generation_time_secs: f32,
+}
+
 #[tauri::command]
 pub async fn save_to_gallery(
     state: State<'_, AppState>,
     image_base64: String,
-    prompt: String,
-    negative_prompt: String,
-    model_id: String,
-    model_name: String,
-    width: u32,
-    height: u32,
-    steps: u32,
-    cfg_scale: f32,
-    seed: i64,
-    sampler: String,
-    generation_time_secs: f32,
+    meta: SaveToGalleryMeta,
 ) -> Result<GalleryItem, String> {
+    let SaveToGalleryMeta {
+        prompt,
+        negative_prompt,
+        model_id,
+        model_name,
+        width,
+        height,
+        steps,
+        cfg_scale,
+        seed,
+        sampler,
+        generation_time_secs,
+    } = meta;
     let gallery_dir = get_gallery_dir(&state.app_handle)?;
 
     // Generate unique ID: timestamp + random suffix

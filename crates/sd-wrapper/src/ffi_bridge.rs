@@ -107,6 +107,20 @@ impl Default for CancelHandle {
     }
 }
 
+/// The optional image inputs of one generation. Everything that is not always
+/// present travels here so `generate` keeps a readable signature; a txt2img
+/// call passes `GenerateInputs::default()`.
+#[derive(Default)]
+pub(crate) struct GenerateInputs<'a> {
+    pub input_image: Option<&'a [u8]>,
+    pub mask_image: Option<&'a [u8]>,
+    /// img2img denoising strength; ignored without `input_image`.
+    pub strength: f32,
+    pub ref_images: Option<&'a [Vec<u8>]>,
+    pub control_image: Option<&'a [u8]>,
+    pub control_strength: Option<f32>,
+}
+
 /// Thin owning wrapper around `*mut sd_sys::sd_ctx_t`.
 /// Freed on drop via `sd_sys::free_sd_ctx`.
 pub(crate) struct SdCppContext {
@@ -361,16 +375,20 @@ impl SdCppContext {
     pub(crate) fn generate(
         &self,
         params: &GenerationParams,
-        input_image: Option<&[u8]>,
-        mask_image: Option<&[u8]>,
-        strength: f32,
+        inputs: GenerateInputs<'_>,
         progress_cb: Option<ProgressCallback>,
         preview_cb: Option<PreviewCallback>,
         cancel_flag: &AtomicBool,
-        ref_images: Option<&[Vec<u8>]>,
-        control_image: Option<&[u8]>,
-        control_strength: Option<f32>,
     ) -> Result<GeneratedImage, SdError> {
+        let GenerateInputs {
+            input_image,
+            mask_image,
+            strength,
+            ref_images,
+            control_image,
+            control_strength,
+        } = inputs;
+
         // Pre-flight cancel check
         if cancel_flag.load(Ordering::SeqCst) {
             return Err(SdError::Cancelled);
@@ -426,8 +444,8 @@ impl SdCppContext {
             // SD1.5=64, SDXL=64, Flux=64, Z-Image=64)
             let (orig_w, orig_h) = (img.width(), img.height());
             let align = 64u32;
-            let aligned_w = ((orig_w + align - 1) / align) * align;
-            let aligned_h = ((orig_h + align - 1) / align) * align;
+            let aligned_w = orig_w.div_ceil(align) * align;
+            let aligned_h = orig_h.div_ceil(align) * align;
 
             let resized = img.resize_exact(aligned_w, aligned_h, image::imageops::FilterType::Lanczos3);
             let rgb_img = resized.to_rgb8();

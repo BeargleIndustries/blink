@@ -103,9 +103,6 @@ const App: Component = () => {
   // LoRA
   const [loras, setLoras] = createSignal<LoraConfig[]>([]);
 
-  // ControlNet
-  const [controlNetEnabled, setControlNetEnabled] = createSignal(false);
-  const [controlStrength, setControlStrength] = createSignal(0.75);
 
   // Image info panel state — populated from gallery select or generation complete
   const [imageInfo, setImageInfo] = createSignal<{
@@ -353,7 +350,6 @@ const App: Component = () => {
         img_cfg: isEditMode ? imgCfg() : undefined,
         loras: loras().length > 0 ? loras() : undefined,
         architecture: activeModel()?.architecture,
-        control_strength: controlNetEnabled() ? controlStrength() : undefined,
       });
     } catch (err) {
       setGenerating(false);
@@ -793,8 +789,6 @@ const App: Component = () => {
         showStrength={mode() === "img2img"}
         imgCfg={imgCfg()} onImgCfgChange={setImgCfg}
         showImgCfg={editMode() && !!inputImage()}
-        controlNetEnabled={controlNetEnabled()} onControlNetChange={setControlNetEnabled}
-        controlStrength={controlStrength()} onControlStrengthChange={setControlStrength}
         loras={loras()} onLorasChange={setLoras}
         perfSettings={perfSettings()} onPerfChange={handlePerfChange}
         hfToken={hfToken()} onHfTokenChange={handleHfTokenChange}

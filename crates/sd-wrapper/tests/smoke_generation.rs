@@ -893,8 +893,7 @@ fn an_undecodable_mask_fails_cleanly_and_leaves_the_context_usable() {
                 base: zimage_cancel_params(4, 42),
                 strength: 0.4,
             },
-            None,
-            None,
+            None, // no ControlNet input
             None,
             None,
         )

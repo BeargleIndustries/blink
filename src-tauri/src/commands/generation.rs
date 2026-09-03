@@ -28,7 +28,6 @@ pub struct GenerationRequest {
     pub img_cfg: Option<f32>,
     pub loras: Option<Vec<LoraRequest>>,
     pub architecture: Option<String>,
-    pub control_strength: Option<f32>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -128,7 +127,6 @@ pub async fn generate_image(
     let input_image = request.input_image;
     let mask_image = request.mask_image;
     let strength = request.strength.unwrap_or(0.75);
-    let control_strength = request.control_strength;
     let seed = params.seed;
 
     // Set up progress callback that emits Tauri events
@@ -183,7 +181,10 @@ pub async fn generate_image(
                 base: params.clone(),
                 strength,
             };
-            ctx.img2img(input_image.unwrap_or_default(), mask_image, img_params, None, control_strength, Some(progress_cb), preview_cb)
+            // No ControlNet input yet: nothing loads a ControlNet model and no
+            // preprocessed control image exists, so the UI toggle was removed
+            // (roadmap: ControlNet). The wrapper API keeps the slot.
+            ctx.img2img(input_image.unwrap_or_default(), mask_image, img_params, None, Some(progress_cb), preview_cb)
         } else {
             ctx.txt2img(params.clone(), params.ref_images.clone(), Some(progress_cb), preview_cb)
         }

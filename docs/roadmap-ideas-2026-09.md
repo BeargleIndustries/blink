@@ -268,6 +268,9 @@ had not caught:
 
 - **Preview thumbnail and blank Size dropdown.** The projection preview rendered at its 64x128 intrinsic size; it now fills the canvas. The Size select had no entry for Z-Image's 512x1024 default so it showed blank; the list now includes the 1:2 pairs and falls back to an entry for any saved size. Along the way: Solid hoists literal keys of a JSX style object into the static template and applies the spread at runtime, so `style={{ ...inputStyle, width }}` never overrode the shared 80px. Merged at module level instead (four sites in the drawer).
 
+- **"Preserve Structure (Canny)" did nothing.** No code path ever set a ControlNet model path, and the generate command sent only a strength with no control image, so sd.cpp ignored the toggle entirely. Removed from Settings until it is wired for real: that needs a per-architecture ControlNet download (SD1.5/SDXL only in sd.cpp), Canny preprocessing of the input image (the wrapper already exposes `preprocess_canny`), and passing the result as `ControlNetInput` — the wrapper API slot is in place.
+- **Clippy clean.** All twelve workspace warnings resolved rather than allowed: three over-long signatures became structs (`GenerateInputs`, `ControlNetInput`, `SaveToGalleryMeta`, with the matching frontend change), a dead companion-size field that nothing read was removed, and the rest were mechanical.
+
 Checked and passing as shipped: the Settings drawer has one placement control
 ("Low-memory mode") and none of the six old toggles; the progress UI shows "Loading"
 before step 1 and never the word "tensor"; a 20-step generation is 14.4 s end to end.

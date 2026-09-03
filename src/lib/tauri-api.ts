@@ -95,20 +95,8 @@ export interface SaveToGalleryParams {
 }
 
 export async function saveToGallery(params: SaveToGalleryParams): Promise<GalleryItem> {
-  return invoke("save_to_gallery", {
-    imageBase64: params.imageBase64,
-    prompt: params.prompt,
-    negativePrompt: params.negativePrompt,
-    modelId: params.modelId,
-    modelName: params.modelName,
-    width: params.width,
-    height: params.height,
-    steps: params.steps,
-    cfgScale: params.cfgScale,
-    seed: params.seed,
-    sampler: params.sampler,
-    generationTimeSecs: params.generationTimeSecs,
-  });
+  const { imageBase64, ...meta } = params;
+  return invoke("save_to_gallery", { imageBase64, meta });
 }
 
 export async function importCustomModel(url: string, name?: string): Promise<void> {

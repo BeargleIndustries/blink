@@ -28,8 +28,7 @@ pub fn generate_img2img(
         input_image.to_vec(),
         mask_image.map(|m| m.to_vec()),
         params.clone(),
-        control_image.map(|c| c.to_vec()),
-        control_strength,
+        control_image.map(|c| ControlNetInput { image: c.to_vec(), strength: control_strength }),
         progress_cb,
         None,
     )

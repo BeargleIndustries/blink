@@ -19,7 +19,6 @@ export interface GenerationRequest {
   img_cfg?: number;
   loras?: LoraConfig[];
   architecture?: string;
-  control_strength?: number;
 }
 
 export interface VideoRequest {

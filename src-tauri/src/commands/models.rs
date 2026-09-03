@@ -1043,7 +1043,6 @@ struct CompanionFile {
     role: String,
     repo: String,
     filename: String,
-    size_bytes: u64,
 }
 
 fn detect_architecture(filename: &str, repo: &str) -> String {
@@ -1073,18 +1072,18 @@ fn detect_architecture(filename: &str, repo: &str) -> String {
 fn get_companion_files(architecture: &str) -> Vec<CompanionFile> {
     match architecture {
         "flux" | "flux-kontext" => vec![
-            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into(), size_bytes: 300_000_000 },
-            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into(), size_bytes: 2_500_000_000 },
-            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into(), size_bytes: 200_000_000 },
+            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into() },
+            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into() },
         ],
         "z-image" => vec![
-            CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-4B-Instruct-2507-GGUF".into(), filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into(), size_bytes: 2_800_000_000 },
-            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into(), size_bytes: 200_000_000 },
+            CompanionFile { role: "llm".into(), repo: "unsloth/Qwen3-4B-Instruct-2507-GGUF".into(), filename: "Qwen3-4B-Instruct-2507-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Comfy-Org/z_image_turbo".into(), filename: "split_files/vae/ae.safetensors".into() },
         ],
         "wan" => vec![
-            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into(), size_bytes: 300_000_000 },
-            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into(), size_bytes: 2_500_000_000 },
-            CompanionFile { role: "vae".into(), repo: "Wan-AI/Wan2.1-T2V-1.3B".into(), filename: "Wan2.1_VAE.pth".into(), size_bytes: 400_000_000 },
+            CompanionFile { role: "clip_l".into(), repo: "comfyanonymous/flux_text_encoders".into(), filename: "clip_l.safetensors".into() },
+            CompanionFile { role: "t5xxl".into(), repo: "city96/t5-v1_1-xxl-encoder-gguf".into(), filename: "t5-v1_1-xxl-encoder-Q4_K_M.gguf".into() },
+            CompanionFile { role: "vae".into(), repo: "Wan-AI/Wan2.1-T2V-1.3B".into(), filename: "Wan2.1_VAE.pth".into() },
         ],
         _ => vec![], // sd1, sdxl, sd3 — single file, no companions
     }

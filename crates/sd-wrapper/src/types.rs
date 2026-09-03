@@ -129,6 +129,14 @@ pub struct Img2ImgParams {
     pub strength: f32,
 }
 
+/// A preprocessed ControlNet conditioning image (e.g. Canny edges) and its
+/// weight. `strength` of `None` means sd.cpp's default (0.9).
+#[derive(Debug, Clone)]
+pub struct ControlNetInput {
+    pub image: Vec<u8>,
+    pub strength: Option<f32>,
+}
+
 impl Default for Img2ImgParams {
     fn default() -> Self {
         Self {

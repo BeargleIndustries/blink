@@ -26,7 +26,7 @@ pub fn upscale_image(
     factor: u32,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    if factor < 1 || factor > 4 {
+    if !(1..=4).contains(&factor) {
         return Err("Upscale factor must be between 1 and 4".to_string());
     }
 

@@ -71,7 +71,9 @@ pub(crate) fn generate_video(
     })?;
 
     // Decode optional init image to raw RGB
-    let mut decoded_rgb: Vec<u8> = Vec::new();
+    // Declared out here so the buffer outlives the raw pointer in `init_image`;
+    // only assigned when there is an input image.
+    let mut decoded_rgb: Vec<u8>;
     let mut init_image = sd_sys::sd_image_t {
         width: 0,
         height: 0,
@@ -84,8 +86,8 @@ pub(crate) fn generate_video(
             reason: format!("Failed to decode input image: {}", e),
         })?;
         let align = 64u32;
-        let aligned_w = ((img.width() + align - 1) / align) * align;
-        let aligned_h = ((img.height() + align - 1) / align) * align;
+        let aligned_w = img.width().div_ceil(align) * align;
+        let aligned_h = img.height().div_ceil(align) * align;
         let resized = img.resize_exact(aligned_w, aligned_h, image::imageops::FilterType::Lanczos3);
         let rgb_img = resized.to_rgb8();
         let (w, h) = rgb_img.dimensions();

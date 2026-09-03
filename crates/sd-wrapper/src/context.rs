@@ -3,7 +3,7 @@ use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 use crate::error::SdError;
-use crate::ffi_bridge::{CancelHandle, SdCppContext, PreviewCallback};
+use crate::ffi_bridge::{CancelHandle, GenerateInputs, SdCppContext, PreviewCallback};
 use crate::types::*;
 use crate::progress::ProgressCallback;
 use crate::video::{self, VideoGenParams};
@@ -20,8 +20,7 @@ pub enum InferenceCommand {
         input_image: Vec<u8>,
         mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
-        control_image: Option<Vec<u8>>,
-        control_strength: Option<f32>,
+        control: Option<ControlNetInput>,
         progress_cb: Option<ProgressCallback>,
         preview_cb: Option<PreviewCallback>,
         result_tx: mpsc::Sender<Result<GeneratedImage, SdError>>,
@@ -127,31 +126,28 @@ impl SdContext {
                             let ref_imgs_opt = if ref_images.is_empty() { None } else { Some(ref_images.as_slice()) };
                             let result = cpp_ctx.generate(
                                 &params,
-                                None,   // no input image for txt2img
-                                None,   // no mask for txt2img
-                                0.0,    // strength unused for txt2img
+                                GenerateInputs { ref_images: ref_imgs_opt, ..Default::default() },
                                 progress_cb,
                                 preview_cb,
                                 &thread_cancel,
-                                ref_imgs_opt,
-                                None,   // no control image for txt2img
-                                None,   // no control strength for txt2img
                             );
                             let _ = result_tx.send(result);
                         }
-                        InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx } => {
+                        InferenceCommand::Img2Img { input_image, mask_image, params, control, progress_cb, preview_cb, result_tx } => {
                             // See the note in Txt2Img: no reset on dequeue.
                             let result = cpp_ctx.generate(
                                 &params.base,
-                                Some(&input_image),
-                                mask_image.as_deref(),
-                                params.strength,
+                                GenerateInputs {
+                                    input_image: Some(&input_image),
+                                    mask_image: mask_image.as_deref(),
+                                    strength: params.strength,
+                                    ref_images: None,
+                                    control_image: control.as_ref().map(|c| c.image.as_slice()),
+                                    control_strength: control.as_ref().and_then(|c| c.strength),
+                                },
                                 progress_cb,
                                 preview_cb,
                                 &thread_cancel,
-                                None,   // no ref_images for img2img
-                                control_image.as_deref(),
-                                control_strength,
                             );
                             let _ = result_tx.send(result);
                         }
@@ -239,8 +235,7 @@ impl SdContext {
         input_image: Vec<u8>,
         mask_image: Option<Vec<u8>>,
         params: Img2ImgParams,
-        control_image: Option<Vec<u8>>,
-        control_strength: Option<f32>,
+        control: Option<ControlNetInput>,
         progress_cb: Option<ProgressCallback>,
         preview_cb: Option<PreviewCallback>,
     ) -> Result<GeneratedImage, SdError> {
@@ -248,7 +243,7 @@ impl SdContext {
         self.cancel_flag.store(false, Ordering::SeqCst);
         let (result_tx, result_rx) = mpsc::channel();
         self.command_tx
-            .send(InferenceCommand::Img2Img { input_image, mask_image, params, control_image, control_strength, progress_cb, preview_cb, result_tx })
+            .send(InferenceCommand::Img2Img { input_image, mask_image, params, control, progress_cb, preview_cb, result_tx })
             .map_err(|_| SdError::ContextCreationFailed {
                 reason: "Inference thread has stopped".into(),
             })?;

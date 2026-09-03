@@ -71,10 +71,11 @@ fn main() {
     // On Windows with CUDA, prefer Ninja generator over VS generators.
     // VS generators require the full VS CUDA integration which is fragile;
     // Ninja works directly with nvcc + MSVC cl.exe.
-    if target_os == "windows" && use_cuda.is_some() {
-        if std::process::Command::new("ninja").arg("--version").output().is_ok() {
-            cmake_cfg.generator("Ninja");
-        }
+    if target_os == "windows"
+        && use_cuda.is_some()
+        && std::process::Command::new("ninja").arg("--version").output().is_ok()
+    {
+        cmake_cfg.generator("Ninja");
     }
 
     // Force Release build for the C++ libraries to avoid CRT mismatch.
