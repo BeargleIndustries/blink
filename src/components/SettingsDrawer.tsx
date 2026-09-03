@@ -65,6 +65,7 @@ const inputStyle = {
 // object into the static template and applies the spread at runtime, so
 // `style={{ ...inputStyle, width: "140px" }}` ends up 80px wide.
 const selectStyle = { ...inputStyle, width: "140px" } as const;
+const seedStyle = { ...inputStyle, width: "100px" } as const;
 
 const labelStyle = {
   "font-size": "12px",
@@ -266,7 +267,7 @@ const SettingsDrawer: Component<SettingsDrawerProps> = (props) => {
               min="-1"
               value={props.seed}
               onInput={(e) => props.onSeedChange(parseInt(e.currentTarget.value) ?? -1)}
-              style={{ ...inputStyle, width: "100px" }}
+              style={seedStyle}
             />
             <button
               onClick={() => props.onSeedChange(-1)}

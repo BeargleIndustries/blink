@@ -143,9 +143,14 @@ impl AppState {
             self.cancel_handle.clone(),
             Some(load_progress_cb),
         )?;
-        let mut lock = self.sd_context.lock().map_err(|e| sd_wrapper::SdError::ContextCreationFailed {
-            reason: format!("Lock poisoned: {}", e),
-        })?;
+        // Recover from a poisoned mutex rather than failing: the new context has
+        // already published itself to the shared cancel handle, and dropping it
+        // here would clear the handle while the old context stayed installed.
+        // We are replacing the guarded value anyway, so the poison is moot.
+        let mut lock = self
+            .sd_context
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         *lock = Some(ctx);
         Ok(())
     }

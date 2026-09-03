@@ -77,6 +77,9 @@ const VideoMode: Component<VideoModeProps> = (props) => {
     "box-sizing": "border-box" as const,
     "font-family": "inherit",
   };
+  // Merged here, not in JSX: Solid applies a JSX style spread at runtime over
+  // the literal keys it hoisted into the template, so the override would lose.
+  const promptStyle = { ...inputStyle, resize: "vertical" as const, "font-size": "14px" };
 
   const labelStyle = {
     "font-size": "11px",
@@ -102,11 +105,7 @@ const VideoMode: Component<VideoModeProps> = (props) => {
         onInput={(e) => setPrompt(e.currentTarget.value)}
         onKeyDown={handleKeyDown}
         disabled={props.generating}
-        style={{
-          ...inputStyle,
-          resize: "vertical",
-          "font-size": "14px",
-        }}
+        style={promptStyle}
       />
 
       {/* Negative prompt collapsible */}
