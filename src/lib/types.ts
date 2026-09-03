@@ -99,7 +99,6 @@ export interface AppSettings {
 
 export interface PerfSettings {
   low_memory: boolean;
-  fast_mode: boolean;
 }
 
 export interface FileDownloadProgress {

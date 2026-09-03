@@ -18,15 +18,6 @@ use serde::{Deserialize, Serialize};
 pub struct PerfSettings {
     #[serde(default)]
     pub low_memory: bool,
-    /// sd.cpp's `spectrum` inference cache, surfaced as "Fast mode".
-    ///
-    /// OFF by default. The measurement gate failed on Blink's flagship stack:
-    /// Z-Image Turbo runs 4 steps and `spectrum_warmup_steps` is also 4
-    /// (`stable-diffusion.cpp:3546`), so the cache never predicts and the output
-    /// is byte-identical. At 20 steps it is 25.8% faster and the output changes.
-    /// See `docs/traces/cache-baseline-6b3edaa.txt`.
-    #[serde(default)]
-    pub fast_mode: bool,
 }
 
 /// Progress while a model is being read off disk. Emitted as

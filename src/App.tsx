@@ -82,7 +82,6 @@ const App: Component = () => {
 
   const [perfSettings, setPerfSettings] = createSignal<PerfSettings>({
     low_memory: false,
-    fast_mode: false,
   });
 
   // Shown between pressing Cancel and the backend confirming it stopped.
@@ -534,8 +533,7 @@ const App: Component = () => {
     }
   };
 
-  const handlePerfChange = async (patch: Partial<PerfSettings>) => {
-    const settings = { ...perfSettings(), ...patch };
+  const handlePerfChange = async (settings: PerfSettings) => {
     setPerfSettings(settings);
     try {
       await savePerfSettings(settings);

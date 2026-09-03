@@ -538,15 +538,6 @@ impl SdCppContext {
             let mut gen_params: sd_sys::sd_img_gen_params_t = std::mem::zeroed();
             sd_sys::sd_img_gen_params_init(&mut gen_params);
 
-            // Inference caching. `sd_cache_params_init` fills in the per-mode
-            // defaults, including all seven `spectrum_*` fields — Blink sets the
-            // mode and nothing else, and exposes no cache mode or parameter to
-            // the user. Off by construction when `fast_mode` is false:
-            // `SD_CACHE_DISABLED` is 0, which is what the zeroed struct already
-            // held before this existed.
-            sd_sys::sd_cache_params_init(&mut gen_params.cache);
-            gen_params.cache.mode = cache_mode_for(params.fast_mode);
-
             gen_params.prompt = prompt_c.as_ptr();
             gen_params.negative_prompt = neg_prompt_c.as_ptr();
             gen_params.width = img2img_width as i32;
@@ -772,20 +763,6 @@ impl Drop for SdCppContext {
                 sd_sys::free_sd_ctx(self.ctx);
             }
         }
-    }
-}
-
-/// Which sd.cpp cache mode a `fast_mode` flag selects.
-///
-/// Only `spectrum` is in scope: it is the one mode that works on both UNet and
-/// DiT architectures. The other five (`easycache`, `ucache`, `dbcache`,
-/// `taylorseer`, `cache_dit`) are deliberately unreachable — a cache mode is an
-/// engine internal, not a user-facing choice.
-pub(crate) fn cache_mode_for(fast_mode: bool) -> sd_sys::sd_cache_mode_t {
-    if fast_mode {
-        sd_sys::sd_cache_mode_t_SD_CACHE_SPECTRUM
-    } else {
-        sd_sys::sd_cache_mode_t_SD_CACHE_DISABLED
     }
 }
 
@@ -1019,33 +996,6 @@ mod tests {
     #[test]
     fn sample_method_lcm_maps_correctly() {
         assert_eq!(SampleMethod::Lcm.to_c(), sd_sys::sample_method_t_LCM_SAMPLE_METHOD);
-    }
-
-    // -- Inference cache --
-
-    #[test]
-    fn cache_is_disabled_when_fast_mode_is_off() {
-        // The off path must be inert: SD_CACHE_DISABLED is 0, the same value the
-        // zeroed `sd_img_gen_params_t` carried before caching existed, which is
-        // what acceptance criterion 1 (byte-identical output) rests on.
-        assert_eq!(cache_mode_for(false), sd_sys::sd_cache_mode_t_SD_CACHE_DISABLED);
-        assert_eq!(sd_sys::sd_cache_mode_t_SD_CACHE_DISABLED, 0);
-    }
-
-    #[test]
-    fn fast_mode_selects_spectrum_and_nothing_else() {
-        assert_eq!(cache_mode_for(true), sd_sys::sd_cache_mode_t_SD_CACHE_SPECTRUM);
-        // Guard against a silent renumbering of the enum putting us on a
-        // different mode: spectrum is the only one in scope.
-        assert_ne!(
-            sd_sys::sd_cache_mode_t_SD_CACHE_SPECTRUM,
-            sd_sys::sd_cache_mode_t_SD_CACHE_TAYLORSEER
-        );
-    }
-
-    #[test]
-    fn generation_params_default_to_fast_mode_off() {
-        assert!(!GenerationParams::default().fast_mode);
     }
 
     // -- CancelHandle --

@@ -94,9 +94,6 @@ pub struct GenerationParams {
     pub img_cfg: Option<f32>,
     // LoRA adapters
     pub loras: Vec<LoraConfig>,
-    /// sd.cpp's `spectrum` inference cache. Off by default; the user-facing name
-    /// is "Fast mode" and no cache mode or `spectrum_*` parameter is ever exposed.
-    pub fast_mode: bool,
 }
 
 impl Default for GenerationParams {
@@ -111,7 +108,6 @@ impl Default for GenerationParams {
             seed: -1,
             sample_method: SampleMethod::EulerA,
             batch_count: 1,
-            fast_mode: false,
             ref_images: Vec::new(),
             img_cfg: None,
             loras: Vec::new(),
