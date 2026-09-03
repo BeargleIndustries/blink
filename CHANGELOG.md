@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v0.4.1 — 2026-09-03
 
 ### Added
 - **Model catalog: new models with capability badges.** Every card now shows what a model can do
